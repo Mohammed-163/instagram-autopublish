@@ -16,7 +16,7 @@ SCOPES = ["https://www.googleapis.com/auth/drive"]
 class DriveClient:
     def __init__(self, service_account_json: str, root_folder_id: str):
         info = json.loads(service_account_json)
-        creds = Credentials.from_service_account_info(info, scopes=SCOPES)
+        creds = Credentials.from_authorized_user_info(info, scopes=SCOPES)
         self.service = build("drive", "v3", credentials=creds)
         self.root_folder_id = root_folder_id
 
