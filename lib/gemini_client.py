@@ -26,7 +26,8 @@ class GeminiClient:
         for i, key in enumerate(self.api_keys):
             try:
                 genai.configure(api_key=key)
-                model = genai.GenerativeModel(config.GEMINI_MODEL_NAME)
+                # تم التعديل هنا لطلب إصدار 1.5 مباشرة لتجاوز حظر الحصة المجانية
+                model = genai.GenerativeModel("gemini-1.5-flash")
                 response = model.generate_content(prompt)
                 return response.text
             except Exception as e:  # google.api_core exceptions vary by version
