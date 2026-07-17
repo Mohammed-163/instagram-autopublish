@@ -68,6 +68,7 @@ def main():
 
     now = datetime.utcnow()
     month_label = now.strftime("%Y-%m")
+    date_str = now.strftime("%Y-%m-%d")  # حساب تاريخ اليوم الحالي لتمريره لـ Gemini
 
     try:
         # 1. Token renewal
@@ -108,7 +109,8 @@ def main():
         step_start = time.time()
         gemini_keys = [config.optional_env("GEMINI_API_KEY_1"), config.optional_env("GEMINI_API_KEY_2"), config.optional_env("GEMINI_API_KEY_3")]
         gemini = GeminiClient(gemini_keys)
-        plan_rows = gemini.build_monthly_plan({"media": insights_data}, competitor_data)
+        # تم تعديل السطر التالي لتمرير متغير التاريخ الحالي date_str كمعامل ثالث
+        plan_rows = gemini.build_monthly_plan({"media": insights_data}, competitor_data, date_str)
         print(f"    ✓ 30-day plan generated successfully (الوقت المنقضي: {time.time() - step_start:.2f} ثانية)")
 
         # 5. Archive + write new plan
