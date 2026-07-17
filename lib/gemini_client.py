@@ -5,7 +5,7 @@ monthly plan building, and error diagnosis for the auto-fix-PR flow.
 """
 import json
 import re
-import time  # تم إضافة مكتبة الوقت
+import time
 
 import google.generativeai as genai
 
@@ -27,20 +27,21 @@ class GeminiClient:
         for i, key in enumerate(self.api_keys):
             try:
                 genai.configure(api_key=key)
+                # استخدام النموذج المستقر والخفيف لتجنب مشاكل نفاد الحصة اليومية
                 model = genai.GenerativeModel("gemini-3.1-flash-lite")
                 response = model.generate_content(prompt)
                 return response.text
-            except Exception as e:  # google.api_core exceptions vary by version
+            except Exception as e:
                 print(f"🔴 [تفاصيل الخطأ الحقيقي للمفتاح {i + 1}]: {e}")
                 
                 error_str = str(e).lower()
                 if "quota" in error_str or "429" in error_str or "resource_exhausted" in error_str:
                     print(f"⚠️ Gemini key #{i + 1} quota exhausted or rate limited (429).")
                     print("⏳ ننتظر 20 ثانية لتبريد عداد جوجل قبل تجربة المفتاح التالي...")
-                    time.sleep(20)  # الانتظار التلقائي لحل مشكلة 5 طلبات بالدقيقة
+                    time.sleep(20)
                     last_error = e
                     continue
-                raise  # any other error is not a quota issue — surface immediately
+                raise
         raise AllKeysExhaustedError(f"All {len(self.api_keys)} Gemini keys exhausted: {last_error}")
 
     @staticmethod
@@ -60,7 +61,7 @@ class GeminiClient:
 
 مواضيع نُشرت مسبقاً ويجب تجنب تكرارها: {avoid_list}
 
-المطلوب: حقيقة نفسية واحدة، مثبتة علمياً وموثوقة فعلاً (وليست خرافة شائعة أو معلومة غير مؤكدة).
+الملطوب: حقيقة نفسية واحدة، مثبتة علمياً وموثوقة فعلاً (وليست خرافة شائعة أو معلومة غير مؤكدة).
 إذا لم تكن متأكداً 100% من صحة معلومة معينة علمياً، اختر موضوعاً نفسياً آخر تكون واثقاً منه بدلاً منها.
 لا تقدم أي تشخيص أو نصيحة طبية/علاجية مباشرة.
 
@@ -101,8 +102,10 @@ class GeminiClient:
 
         raise ValueError("Gemini failed to produce a verified, in-budget post after retries")
 
-    def build_monthly_plan(self, insights_json: dict, competitor_json: dict) -> list:
+    def build_monthly_plan(self, insights_json: dict, competitor_json: dict, current_date_str: str) -> list:
         prompt = f"""أنت مخطط محتوى استراتيجي لحساب انستغرام متخصص بـ"حقائق نفسية سريعة".
+
+التاريخ الحالي الفعلي لليوم هو: {current_date_str}
 
 بيانات أداء آخر 30 يوم (JSON):
 {json.dumps(insights_json, ensure_ascii=False)}
@@ -110,7 +113,10 @@ class GeminiClient:
 تحليل المنافسين (JSON):
 {json.dumps(competitor_json, ensure_ascii=False)}
 
-المطلوب: خطة نشر لـ30 يوماً قادمة. لكل يوم حدد:
+المطلوب: خطة نشر لـ30 يوماً قادمة. 
+تنبيه حاسم وصارم: يجب أن تبدأ تواريخ الأيام في الخطة من تاريخ اليوم ({current_date_str}) صعوداً وتتقدم يوماً بعد يوم بالتسلسل الصحيح لـ30 يوماً قادمة. لا تقم أبداً باختراع أو استخدام تواريخ قديمة أو من سنوات سابقة.
+
+لكل يوم حدد:
 - عدد المنشورات (1 إلى 3) بناءً على الأداء الفعلي (لا تفترض رقماً ثابتاً)
 - نوع كل منشور ووقت مقترح (تنويع بين الصباح والمساء حسب أفضل أوقات التفاعل بالبيانات)
 - كلمات بحث Pixabay لكل منشور (وصف بصري مجرد: ألوان/تدرجات، ليس حرفياً)
