@@ -30,6 +30,9 @@ class GeminiClient:
                 response = model.generate_content(prompt)
                 return response.text
             except Exception as e:  # google.api_core exceptions vary by version
+                # السطر الجديد لكشف الخطأ الحقيقي
+                print(f"🔴 [تفاصيل الخطأ الحقيقي للمفتاح {i + 1}]: {e}")
+                
                 error_str = str(e).lower()
                 if "quota" in error_str or "429" in error_str or "resource_exhausted" in error_str:
                     print(f"⚠️ Gemini key #{i + 1} quota exhausted, trying next key")
