@@ -5,6 +5,7 @@ monthly plan building, and error diagnosis for the auto-fix-PR flow.
 """
 import json
 import re
+import time  # تم إضافة مكتبة الوقت
 
 import google.generativeai as genai
 
@@ -26,7 +27,6 @@ class GeminiClient:
         for i, key in enumerate(self.api_keys):
             try:
                 genai.configure(api_key=key)
-                # تم التحديث إلى أحدث إصدار مستقر بناءً على توثيق جوجل الجديد
                 model = genai.GenerativeModel("gemini-3.5-flash")
                 response = model.generate_content(prompt)
                 return response.text
@@ -35,7 +35,9 @@ class GeminiClient:
                 
                 error_str = str(e).lower()
                 if "quota" in error_str or "429" in error_str or "resource_exhausted" in error_str:
-                    print(f"⚠️ Gemini key #{i + 1} quota exhausted, trying next key")
+                    print(f"⚠️ Gemini key #{i + 1} quota exhausted or rate limited (429).")
+                    print("⏳ ننتظر 20 ثانية لتبريد عداد جوجل قبل تجربة المفتاح التالي...")
+                    time.sleep(20)  # الانتظار التلقائي لحل مشكلة 5 طلبات بالدقيقة
                     last_error = e
                     continue
                 raise  # any other error is not a quota issue — surface immediately
