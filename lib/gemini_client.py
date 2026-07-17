@@ -26,12 +26,11 @@ class GeminiClient:
         for i, key in enumerate(self.api_keys):
             try:
                 genai.configure(api_key=key)
-                # تم التعديل هنا لطلب إصدار 1.5 مباشرة لتجاوز حظر الحصة المجانية
-                model = genai.GenerativeModel("gemini-1.5-flash")
+                # تم التحديث إلى أحدث إصدار مستقر بناءً على توثيق جوجل الجديد
+                model = genai.GenerativeModel("gemini-3.5-flash")
                 response = model.generate_content(prompt)
                 return response.text
             except Exception as e:  # google.api_core exceptions vary by version
-                # السطر الجديد لكشف الخطأ الحقيقي
                 print(f"🔴 [تفاصيل الخطأ الحقيقي للمفتاح {i + 1}]: {e}")
                 
                 error_str = str(e).lower()
@@ -44,7 +43,6 @@ class GeminiClient:
 
     @staticmethod
     def _extract_json(text: str) -> dict:
-        # Strip markdown code fences if the model added them despite instructions
         cleaned = re.sub(r"^```json\s*|```\s*$", "", text.strip(), flags=re.MULTILINE)
         return json.loads(cleaned)
 
@@ -54,8 +52,6 @@ class GeminiClient:
         return lo <= count <= hi
 
     def generate_post_content(self, recent_topics: list, post_type: str = "quick_psychological_fact") -> dict:
-        """Generates one post's content. Retries once with a different angle
-        if confidence_check fails or word budgets are violated."""
         avoid_list = ", ".join(recent_topics) if recent_topics else "(لا يوجد سجل سابق بعد)"
 
         prompt = f"""أنت كاتب محتوى متخصص بـ"حقائق نفسية سريعة" لمنشورات انستغرام قصيرة (فئة: {post_type}).
@@ -89,7 +85,7 @@ class GeminiClient:
             try:
                 data = self._extract_json(raw)
             except (json.JSONDecodeError, ValueError):
-                continue  # malformed JSON, retry
+                continue
 
             if data.get("confidence_check") != "verified":
                 continue
@@ -100,12 +96,10 @@ class GeminiClient:
             )
             if fields_ok:
                 return data
-            # otherwise fall through to retry
 
         raise ValueError("Gemini failed to produce a verified, in-budget post after retries")
 
     def build_monthly_plan(self, insights_json: dict, competitor_json: dict) -> list:
-        """Returns a list of daily plan rows matching CURRENT_PLAN_HEADERS order."""
         prompt = f"""أنت مخطط محتوى استراتيجي لحساب انستغرام متخصص بـ"حقائق نفسية سريعة".
 
 بيانات أداء آخر 30 يوم (JSON):
@@ -145,7 +139,6 @@ class GeminiClient:
         return rows
 
     def diagnose_error(self, error_message: str, code_snippet: str) -> str:
-        """Returns a suggested fix (as a unified diff or corrected code block)."""
         prompt = f"""حلل خطأ البرمجة التالي واقترح إصلاحاً دقيقاً.
 
 رسالة الخطأ:
