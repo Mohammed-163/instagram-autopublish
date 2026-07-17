@@ -6,13 +6,12 @@ Monthly task — runs on the 1st of each month:
    uploading its output JSON to the same Drive folder)
 4. Send both JSON files to Gemini to build a 30-day plan
 5. Archive Current_Plan -> Plan_History, write the new plan
-6. Pre-download backgrounds for each planned post, upload to Drive
+6. (Skipped) Pre-download backgrounds is removed to conserve Gemini quota
 7. Telegram summary of the new plan
 """
 import base64
 import os
 import sys
-import tempfile
 from datetime import datetime
 
 import requests
@@ -23,7 +22,6 @@ from lib import config
 from lib.error_handler import CriticalError
 from lib.gemini_client import GeminiClient
 from lib.instagram_client import InstagramClient, InstagramAPIError
-from lib.pixabay_client import PixabayClient
 from lib.drive_client import DriveClient
 from lib.sheets_client import SheetsClient
 from lib.telegram_notifier import TelegramNotifier
@@ -111,28 +109,8 @@ def main():
         print("5/7 — Archiving old plan and writing new one...")
         sheets.archive_and_reset_plan(plan_rows, month_label)
 
-        # 6. Pre-download backgrounds
-        print("6/7 — Pre-downloading backgrounds for planned posts...")
-        pixabay = PixabayClient(config.require_env("PIXABAY_API_KEY"))
-        for row_i, row in enumerate(plan_rows, start=1):
-            sheet_row_index = row_i + 1  # +1: header row occupies row 1 in Current_Plan
-            for post_i in range(1, 4):
-                kw_field = f"post_{post_i}_bg_keywords"
-                kw_idx = config.CURRENT_PLAN_HEADERS.index(kw_field)
-                keywords = row[kw_idx] if kw_idx < len(row) else ""
-                if not keywords:
-                    continue
-                with tempfile.TemporaryDirectory() as tmpdir:
-                    bg_path = os.path.join(tmpdir, "bg.jpg")
-                    try:
-                        pixabay.download_background(keywords, bg_path)
-                        file_id = drive.upload_image(bg_path, f"plan_{row[0]}_post_{post_i}.jpg", month_folder_id)
-                        sheets.update_row_field(
-                            config.CURRENT_PLAN_TAB, sheet_row_index,
-                            f"post_{post_i}_bg_file_id", file_id,
-                        )
-                    except Exception:
-                        continue  # this post falls back to a fresh Pixabay pull at generation time
+        # 6. Pre-download backgrounds (تم إلغاؤها لتوفير الحصة وتسريع السكربت)
+        print("6/7 — Skipping pre-download (Backgrounds will be fetched dynamically daily)...")
 
         # 7. Telegram summary
         summary_lines = [f"{r[0]}: {r[1]} منشور" for r in plan_rows]
