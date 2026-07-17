@@ -12,6 +12,7 @@ Monthly task — runs on the 1st of each month:
 import base64
 import os
 import sys
+import time  # تم إضافة مكتبة الوقت لقياس الأداء
 from datetime import datetime
 
 import requests
@@ -55,6 +56,7 @@ def update_github_secret(github_pat: str, github_repo: str, secret_name: str, se
 
 
 def main():
+    script_start_time = time.time()  # عداد الوقت الإجمالي للسكربت
     config.check_required_env_vars(REQUIRED_VARS)
 
     notifier = TelegramNotifier(config.require_env("TELEGRAM_BOT_TOKEN"), config.require_env("TELEGRAM_CHAT_ID"))
@@ -70,6 +72,7 @@ def main():
     try:
         # 1. Token renewal
         print("1/7 — Renewing Meta access token...")
+        step_start = time.time()
         new_token = InstagramClient.exchange_token(
             config.require_env("FB_APP_ID"), config.require_env("FB_APP_SECRET"), config.require_env("IG_ACCESS_TOKEN"),
         )
@@ -77,13 +80,14 @@ def main():
         if not ig.verify_token():
             raise CriticalError("التوكن الجديد بعد التجديد لم يجتز التحقق")
         update_github_secret(config.require_env("GH_PAT"), config.require_env("GH_REPO"), "IG_ACCESS_TOKEN", new_token)
-        print("    ✓ Token renewed and secret updated")
+        print(f"    ✓ Token renewed and secret updated (الوقت المنقضي: {time.time() - step_start:.2f} ثانية)")
 
         drive = DriveClient(config.load_drive_oauth_token_json(), config.require_env("GOOGLE_DRIVE_FOLDER_ID"))
         month_folder_id = drive.get_or_create_month_folder(month_label)
 
         # 2. Pull insights
         print("2/7 — Pulling last 30 days of insights...")
+        step_start = time.time()
         recent_media = ig.get_recent_media(limit=30)
         insights_data = []
         for m in recent_media:
@@ -93,32 +97,41 @@ def main():
             except InstagramAPIError:
                 continue
         drive.upload_json({"month": month_label, "media": insights_data}, "insights.json", month_folder_id)
-        print(f"    ✓ Pulled insights for {len(insights_data)} posts")
+        print(f"    ✓ Pulled insights for {len(insights_data)} posts (الوقت المنقضي: {time.time() - step_start:.2f} ثانية)")
 
         # 3. Competitor analysis (manual — Manus)
         print("3/7 — Competitor analysis is manual (Manus). See MANUS_INSTRUCTIONS.md")
-        competitor_data = {}  # placeholder; a human runs Manus and uploads competitor.json to Drive
+        competitor_data = {}  # placeholder
 
         # 4. Build plan
         print("4/7 — Building 30-day plan via Gemini...")
+        step_start = time.time()
         gemini_keys = [config.optional_env("GEMINI_API_KEY_1"), config.optional_env("GEMINI_API_KEY_2"), config.optional_env("GEMINI_API_KEY_3")]
         gemini = GeminiClient(gemini_keys)
         plan_rows = gemini.build_monthly_plan({"media": insights_data}, competitor_data)
+        print(f"    ✓ 30-day plan generated successfully (الوقت المنقضي: {time.time() - step_start:.2f} ثانية)")
 
         # 5. Archive + write new plan
         print("5/7 — Archiving old plan and writing new one...")
+        step_start = time.time()
         sheets.archive_and_reset_plan(plan_rows, month_label)
+        print(f"    ✓ Sheets updated successfully (الوقت المنقضي: {time.time() - step_start:.2f} ثانية)")
 
-        # 6. Pre-download backgrounds (تم إلغاؤها لتوفير الحصة وتسريع السكربت)
+        # 6. Pre-download backgrounds
         print("6/7 — Skipping pre-download (Backgrounds will be fetched dynamically daily)...")
 
         # 7. Telegram summary
+        print("7/7 — Sending summary and finishing up...")
+        step_start = time.time()
         summary_lines = [f"{r[0]}: {r[1]} منشور" for r in plan_rows]
         notifier.notify_success(
             "تم إنشاء خطة الشهر بنجاح\n" + "\n".join(summary_lines[:10]) +
             (f"\n... و{len(summary_lines) - 10} يوماً إضافياً" if len(summary_lines) > 10 else "")
         )
-        print("7/7 — Done.")
+        print(f"    ✓ Summary sent (الوقت المنقضي: {time.time() - step_start:.2f} ثانية)")
+        
+        total_time = time.time() - script_start_time
+        print(f"\n🎉 Done. الإجمالي المستغرق للمهمة الشهرية بالكامل: {total_time:.2f} ثانية ({total_time/60:.2f} دقيقة).")
 
     except CriticalError as e:
         notifier.alert_critical("فشل المهمة الشهرية", str(e))
