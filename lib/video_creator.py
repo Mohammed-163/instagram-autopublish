@@ -3,24 +3,16 @@ Image + video generation pipeline.
 
 1. Load background, resize/crop to 1080x1920
 2. Apply semi-transparent dark overlay for text legibility
-3. Reshape + reorder Arabic text (arabic_reshaper + python-bidi)
-4. Draw hook/fact/cta lines with Tajawal ExtraBold in the agreed color scheme
-5. Export PNG, then convert to a 6-second silent-audio-track MP4 via ffmpeg
-6. Delete the intermediate PNG and the raw background image
+3. Draw hook/fact/cta lines with Tajawal ExtraBold using Pillow's native RTL support
+4. Export PNG, then convert to a 6-second silent-audio-track MP4 via ffmpeg
+5. Delete the intermediate PNG and the raw background image
 """
 import os
 import subprocess
 
-import arabic_reshaper
-from bidi.algorithm import get_display
 from PIL import Image, ImageDraw, ImageFont
 
 from . import config
-
-
-def _prepare_arabic(text: str) -> str:
-    reshaped = arabic_reshaper.reshape(text)
-    return get_display(reshaped)
 
 
 def _hex_to_rgb(hex_color: str) -> tuple:
@@ -59,12 +51,14 @@ class VideoCreator:
     def _draw_centered_text(self, draw: ImageDraw.Draw, text: str, font: ImageFont.FreeTypeFont,
                              color: str, y: int, canvas_width: int) -> int:
         """Draws text centered horizontally at y, wrapping if needed. Returns new y."""
-        prepared = _prepare_arabic(text)
-        bbox = draw.textbbox((0, 0), prepared, font=font)
+        # استخدام دعم اللغة العربية والاتجاه المدمج في Pillow مباشرة
+        bbox = draw.textbbox((0, 0), text, font=font, direction="rtl", language="ar")
         text_w = bbox[2] - bbox[0]
         text_h = bbox[3] - bbox[1]
         x = (canvas_width - text_w) // 2
-        draw.text((x, y), prepared, font=font, fill=_hex_to_rgb(color))
+        
+        # رسم النص مع تحديد الاتجاه واللغة
+        draw.text((x, y), text, font=font, fill=_hex_to_rgb(color), direction="rtl", language="ar")
         return y + text_h + 40  # spacing between lines
 
     def create_image(self, background_path: str, hook: str, fact: str, cta: str, output_path: str) -> str:
