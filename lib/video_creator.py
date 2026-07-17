@@ -3,7 +3,7 @@ Image + video generation pipeline.
 
 1. Load background, resize/crop to 1080x1920
 2. Apply semi-transparent dark overlay for text legibility
-3. Draw hook/fact/cta lines with Tajawal ExtraBold using Pillow's native RTL support
+3. Draw hook/fact/cta lines with Tajawal ExtraBold using Pillow's native RTL support (with auto word-wrap)
 4. Export PNG, then convert to a 6-second silent-audio-track MP4 via ffmpeg
 5. Delete the intermediate PNG and the raw background image
 """
@@ -50,16 +50,45 @@ class VideoCreator:
 
     def _draw_centered_text(self, draw: ImageDraw.Draw, text: str, font: ImageFont.FreeTypeFont,
                              color: str, y: int, canvas_width: int) -> int:
-        """Draws text centered horizontally at y, wrapping if needed. Returns new y."""
-        # استخدام دعم اللغة العربية والاتجاه المدمج في Pillow مباشرة
-        bbox = draw.textbbox((0, 0), text, font=font, direction="rtl", language="ar")
-        text_w = bbox[2] - bbox[0]
-        text_h = bbox[3] - bbox[1]
-        x = (canvas_width - text_w) // 2
+        """Draws text centered horizontally at y, wrapping into multiple lines if needed. Returns new y."""
         
-        # رسم النص مع تحديد الاتجاه واللغة
-        draw.text((x, y), text, font=font, fill=_hex_to_rgb(color), direction="rtl", language="ar")
-        return y + text_h + 40  # spacing between lines
+        # حساب العرض الأقصى المسموح به للنص (نترك هامش 100 بكسل من كل جانب لضمان عدم اقترابه من حواف الشاشة)
+        max_width = canvas_width - 200
+        
+        words = text.split()
+        lines = []
+        current_line = []
+
+        # خوارزمية تقسيم النص إلى أسطر بناءً على العرض الفعلي للكلمات
+        for word in words:
+            test_line = ' '.join(current_line + [word])
+            bbox = draw.textbbox((0, 0), test_line, font=font, direction="rtl", language="ar")
+            text_w = bbox[2] - bbox[0]
+            
+            if text_w <= max_width:
+                current_line.append(word)
+            else:
+                if current_line:
+                    lines.append(' '.join(current_line))
+                    current_line = [word]
+                else:
+                    lines.append(word)
+                    current_line = []
+        if current_line:
+            lines.append(' '.join(current_line))
+
+        # رسم الأسطر بشكل متتالي
+        line_spacing = 20  # المسافة بين الأسطر التابعة لنفس الجملة
+        for line in lines:
+            bbox = draw.textbbox((0, 0), line, font=font, direction="rtl", language="ar")
+            text_w = bbox[2] - bbox[0]
+            text_h = bbox[3] - bbox[1]
+            x = (canvas_width - text_w) // 2
+            
+            draw.text((x, y), line, font=font, fill=_hex_to_rgb(color), direction="rtl", language="ar")
+            y += text_h + line_spacing
+
+        return y + 40  # المسافة الكبيرة بين الفقرات المختلفة (مثل المسافة بين الحقيقة العلمية ودعوة الحفظ)
 
     def create_image(self, background_path: str, hook: str, fact: str, cta: str, output_path: str) -> str:
         img = self._load_background(background_path)
@@ -70,8 +99,8 @@ class VideoCreator:
         font_fact = ImageFont.truetype(self.font_path, config.FONT_SIZE_FACT)
         font_cta = ImageFont.truetype(self.font_path, config.FONT_SIZE_CTA)
 
-        # Vertically center the 3-line block roughly in the middle third
-        y = int(config.VIDEO_HEIGHT * 0.38)
+        # تم رفع النص قليلاً للأعلى (0.32 بدلاً من 0.38) لكي يتسع براحة في حال كانت الأسطر كثيرة
+        y = int(config.VIDEO_HEIGHT * 0.32)
         y = self._draw_centered_text(draw, hook, font_hook, config.COLOR_HOOK, y, config.VIDEO_WIDTH)
         y = self._draw_centered_text(draw, fact, font_fact, config.COLOR_FACT, y, config.VIDEO_WIDTH)
         self._draw_centered_text(draw, cta, font_cta, config.COLOR_CTA, y, config.VIDEO_WIDTH)
