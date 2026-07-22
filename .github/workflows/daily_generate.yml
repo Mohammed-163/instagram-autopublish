@@ -1,8 +1,6 @@
 name: Daily Generate
 
 on:
-  schedule:
-    - cron: "0 2 * * *"  # 02:00 UTC = 05:00 Baghdad
   workflow_dispatch:
 
 jobs:
