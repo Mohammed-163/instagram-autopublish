@@ -5,6 +5,10 @@ on:
   repository_dispatch:
     types: [daily_generate]
 
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: false
+
 jobs:
   generate:
     runs-on: ubuntu-latest
