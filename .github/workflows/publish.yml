@@ -1,9 +1,9 @@
 name: Publish
 
 on:
-  schedule:
-    - cron: "*/15 * * * *"
   workflow_dispatch:
+  repository_dispatch:
+    types: [publish]
 
 jobs:
   publish:
