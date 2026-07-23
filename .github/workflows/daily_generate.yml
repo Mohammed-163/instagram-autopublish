@@ -1,9 +1,9 @@
 name: Daily Generate
 
 on:
-  schedule:
-    - cron: "0 2 * * *"  # 02:00 UTC = 05:00 Baghdad (Iraq observes no DST)
   workflow_dispatch:
+  repository_dispatch:
+    types: [daily_generate]
 
 jobs:
   generate:
