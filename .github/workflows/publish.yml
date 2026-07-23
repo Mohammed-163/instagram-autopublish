@@ -5,6 +5,10 @@ on:
   repository_dispatch:
     types: [publish]
 
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: false
+
 jobs:
   publish:
     runs-on: ubuntu-latest
