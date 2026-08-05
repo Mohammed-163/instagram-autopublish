@@ -1,0 +1,80 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+*.egg
+*.egg-info/
+dist/
+build/
+eggs/
+parts/
+var/
+sdist/
+develop-eggs/
+.installed.cfg
+lib/
+lib64/
+wheels/
+
+# Testing / Quality
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+*.lcov
+.tox/
+
+# Local env
+.env
+.env.*
+!.env.example
+
+# Credentials (never commit)
+credentials.json
+token.json
+service_account.json
+*.p12
+*.pem
+*.key
+
+# Databases (local dev only)
+*.db
+*.sqlite
+*.sqlite3
+
+# Logs
+logs/
+*.log
+
+# Backups (contain production data)
+backups/
+
+# Rotation state (local dev cache)
+gemini_rotation_state.json
+
+# Operational temp
+health_status.json
+
+# IDE
+.vscode/
+.idea/
+*.sublime-project
+*.sublime-workspace
+
+# OS
+.DS_Store
+Thumbs.db
+
+# ZIP archives
+*.zip
+
+# Temp files
+*.tmp
+*.bak
+*.swp
+*~
