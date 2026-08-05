@@ -1,0 +1,18 @@
+{
+  "tests/test_operational.py::TestGeminiRotation::test_rotation_order_tries_model_before_next_key": true,
+  "tests/test_operational.py::TestGeminiRotation::test_state_persists_after_success": true,
+  "tests/test_operational.py::TestGeminiRotation::test_auth_error_skips_all_models_for_key": true,
+  "tests/test_operational.py::TestGeminiRotation::test_all_combinations_exhausted_raises_clearly": true,
+  "tests/test_operational.py::TestGeminiModelList::test_rotation_order_key1_before_key2": true,
+  "tests/phase5_6/engines/test_strategy_planning_engine.py::test_generate_weekly_strategy_creates_version_and_candidates": true,
+  "tests/phase5_6/engines/test_strategy_planning_engine.py::test_generate_weekly_strategy_never_calls_publish_or_schedule_apis": true,
+  "tests/phase5_6/engines/test_strategy_planning_engine.py::test_candidates_have_no_two_consecutive_same_category": true,
+  "tests/phase5_6/engines/test_strategy_planning_engine.py::test_candidates_have_no_two_consecutive_same_hook_type": true,
+  "tests/phase5_6/engines/test_strategy_planning_engine.py::test_candidates_have_no_repeated_topics_within_week": true,
+  "tests/phase5_6/engines/test_strategy_planning_engine.py::test_each_candidate_is_fully_explainable": true,
+  "tests/phase5_6/engines/test_strategy_planning_engine.py::test_exploitation_used_when_proven_hook_rule_exists": true,
+  "tests/phase5_6/engines/test_strategy_planning_engine.py::test_weekly_strategy_completed_event_emitted_after_all_candidates": true,
+  "tests/phase5_6/engines/test_strategy_planning_engine.py::test_target_posts_respects_settings_minimum": true,
+  "tests/phase5_6/engines/test_strategy_planning_engine.py::test_records_explanation_for_the_whole_version": true,
+  "tests/phase5_6/engines/test_strategy_planning_engine.py::test_heartbeat_reported_healthy": true
+}
