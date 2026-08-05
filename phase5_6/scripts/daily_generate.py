@@ -34,25 +34,32 @@ def _fetch_vetted_background(pixabay, gemini, pixabay_query: str, topic_summary:
     Gemini (via the reserved image-check key) to reject any that aren't
     decent/halal and pick the best topical match among the rest. Falls back
     to the generic abstract query once if the first batch is fully rejected
-    or unavailable. Raises if nothing usable is found either way."""
-    candidates = pixabay.download_candidates(pixabay_query, tmpdir, n=config.IMAGE_CANDIDATE_COUNT)
-    chosen_index = gemini.select_best_image(candidates, topic_summary) if candidates else -1
+    or unavailable. Raises if nothing usable is found either way.
 
-    if chosen_index < 0:
+    NOTE: select_best_image() returns the chosen item directly (a local file
+    path string, or None) — it does NOT return an integer index.  The old code
+    incorrectly compared the returned path to -1 and used it as a list index,
+    causing a TypeError at runtime.  The fix: capture the return value as
+    `chosen` and check `is None` instead of `< 0`.
+    """
+    candidates = pixabay.download_candidates(pixabay_query, tmpdir, n=config.IMAGE_CANDIDATE_COUNT)
+    chosen = gemini.select_best_image(candidates, topic_summary) if candidates else None
+
+    if chosen is None:
         print("⚠️ No suitable image among primary candidates — trying fallback keywords once.")
         candidates = pixabay.download_candidates(
             config.PIXABAY_FALLBACK_KEYWORDS, tmpdir, n=config.IMAGE_CANDIDATE_COUNT,
             filename_prefix="bg_fallback",
         )
-        chosen_index = gemini.select_best_image(candidates, topic_summary) if candidates else -1
+        chosen = gemini.select_best_image(candidates, topic_summary) if candidates else None
 
-    if chosen_index < 0:
+    if chosen is None:
         raise RuntimeError(
             f"No compliant/suitable background image found for '{pixabay_query}' "
             f"or the fallback query, even after Gemini vetting."
         )
 
-    return candidates[chosen_index]
+    return chosen
 
 
 def today_baghdad() -> datetime:
@@ -104,8 +111,44 @@ def main():
         for i in range(1, post_count + 1):
             try:
                 recent_topics = sheets.get_recent_topics()
+
+                # ── Step 5: Generate core content ──────────────────────────
                 content = gemini.generate_post_content(recent_topics)
 
+                # ── Step 5b: Generate caption + hashtags ────────────────────
+                # generate_post_content does NOT produce caption_arabic or
+                # hashtags; those require a separate Gemini call.  Without this
+                # step, content["caption_arabic"] at the log-append stage would
+                # always raise KeyError.
+                caption_data = gemini.generate_caption_and_hashtags(
+                    content["hook_line"], content["fact_line"], content["cta_line"]
+                )
+                content.update(caption_data)
+
+                # Normalise hashtags: generate_caption_and_hashtags returns a
+                # space-separated string ("#tag1 #tag2 …").  The log-append
+                # step does " ".join(list), so we convert to list here once.
+                # Without this, " ".join(str) would join individual characters.
+                raw_hashtags = content.get("hashtags", "")
+                if isinstance(raw_hashtags, str):
+                    content["hashtags"] = raw_hashtags.split()
+
+                # ── Step 6/7: Validate ALL required fields ──────────────────
+                # This gate must run before ANY media operation so that a bad
+                # generation response is caught here with a clear message
+                # rather than as a cryptic KeyError inside the media stage.
+                _REQUIRED = [
+                    "topic_slug", "hook_line", "fact_line", "cta_line",
+                    "pixabay_query", "caption_arabic", "hashtags",
+                ]
+                _missing = [f for f in _REQUIRED if not content.get(f)]
+                if _missing:
+                    raise ValueError(
+                        f"Content generation incomplete — missing required fields: {_missing}. "
+                        f"Present keys: {list(content.keys())}"
+                    )
+
+                # ── Step 8: Search / download media ────────────────────────
                 bg_file_id = (plan or {}).get(f"post_{i}_bg_file_id")
                 with tempfile.TemporaryDirectory() as tmpdir:
                     bg_path = os.path.join(tmpdir, "bg.jpg")
