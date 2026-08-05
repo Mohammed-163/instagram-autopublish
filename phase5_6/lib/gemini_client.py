@@ -88,14 +88,15 @@ class GeminiClient:
   "topic_slug": "معرف قصير بالإنجليزية بدون مسافات",
   "hook_line": "...",
   "fact_line": "...",
-  "cta_line": "..."
+  "cta_line": "...",
+  "pixabay_query": "2-4 english keywords describing a calm/abstract background image that fits the topic"
 }}"""
 
         for attempt in range(3):
             raw = self._call_with_fallback(prompt)
             try:
                 data = self._extract_json(raw)
-                required = ["topic_slug", "hook_line", "fact_line", "cta_line"]
+                required = ["topic_slug", "hook_line", "fact_line", "cta_line", "pixabay_query"]
                 if not all(k in data for k in required):
                     continue
                 return data
