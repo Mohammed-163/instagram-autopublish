@@ -1,0 +1,51 @@
+name: Measurement — Daily Post Generation
+
+on:
+  schedule:
+    - cron: "0 2 * * *"   # 05:00 Asia/Baghdad (UTC+3)
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Dry run (skip IG publish)"
+        required: false
+        default: "false"
+
+concurrency:
+  group: measurement
+  cancel-in-progress: false
+
+jobs:
+  generate:
+    name: Generate daily posts
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.11", cache: pip}
+      - run: pip install -r requirements.txt google-genai --quiet
+
+      - name: Run daily_generate.py
+        env:
+          GOOGLE_SHEET_ID:                   ${{ secrets.GOOGLE_SHEET_ID }}
+          GOOGLE_DRIVE_FOLDER_ID:            ${{ secrets.GOOGLE_DRIVE_FOLDER_ID }}
+          GOOGLE_SERVICE_ACCOUNT_JSON_B64:   ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON_B64 }}
+          GOOGLE_OAUTH_TOKEN_JSON_B64:       ${{ secrets.GOOGLE_OAUTH_TOKEN_JSON_B64 }}
+          GEMINI_API_KEY_1:                  ${{ secrets.GEMINI_API_KEY_1 }}
+          GEMINI_API_KEY_2:                  ${{ secrets.GEMINI_API_KEY_2 }}
+          GEMINI_API_KEY_3:                  ${{ secrets.GEMINI_API_KEY_3 }}
+          GEMINI_API_KEY_IMAGE_CHECK:        ${{ secrets.GEMINI_API_KEY_IMAGE_CHECK }}
+          PIXABAY_API_KEY:                   ${{ secrets.PIXABAY_API_KEY }}
+          TELEGRAM_BOT_TOKEN:                ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID:                  ${{ secrets.TELEGRAM_CHAT_ID }}
+          DRY_RUN:                           ${{ github.event.inputs.dry_run || 'false' }}
+        run: python phase5_6/scripts/daily_generate.py
+
+      - name: Notify failure
+        if: failure()
+        uses: appleboy/telegram-action@master
+        with:
+          to: ${{ secrets.TELEGRAM_CHAT_ID }}
+          token: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          message: "🔴 Measurement FAILED\n${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"

@@ -1,0 +1,53 @@
+name: Token Refresh — Meta/Instagram (Weekly)
+
+on:
+  schedule:
+    - cron: "0 23 * * 6"   # Sunday 02:00 Baghdad = Saturday 23:00 UTC
+  workflow_dispatch:
+
+concurrency:
+  group: token-refresh
+  cancel-in-progress: false   # never cancel a token refresh mid-flight
+
+jobs:
+  refresh:
+    name: Refresh Meta long-lived token
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    permissions:
+      contents: read  # refresh_token.py uses GH_PAT (fine-grained) for secret update
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt requests PyNaCl --quiet
+
+      - name: Refresh and auto-update GitHub Secret
+        env:
+          FB_APP_ID:          ${{ secrets.FB_APP_ID }}
+          FB_APP_SECRET:      ${{ secrets.FB_APP_SECRET }}
+          IG_ACCESS_TOKEN:    ${{ secrets.IG_ACCESS_TOKEN }}
+          IG_BUSINESS_ID:     ${{ secrets.IG_BUSINESS_ID }}
+          GH_PAT:             ${{ secrets.GH_PAT }}
+          GH_REPO:            ${{ github.repository }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID:   ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: python phase5_6/scripts/refresh_token.py
+
+      - name: Notify failure (token may still be valid — check expiry)
+        if: failure()
+        uses: appleboy/telegram-action@master
+        with:
+          to:    ${{ secrets.TELEGRAM_CHAT_ID }}
+          token: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          message: |
+            🔴 Token Refresh FAILED — manual action may be required before token expires.
+            Check token expiry in Meta developer console.
+            Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}

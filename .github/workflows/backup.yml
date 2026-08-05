@@ -1,0 +1,52 @@
+name: Weekly Backup
+
+on:
+  schedule:
+    - cron: "0 0 * * 0"   # Sunday 03:00 Asia/Baghdad
+  workflow_dispatch:
+
+concurrency:
+  group: backup
+  cancel-in-progress: false
+
+jobs:
+  backup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.11", cache: pip}
+      - run: pip install -r requirements.txt --quiet
+
+      - name: Sheets CSV backup
+        env:
+          GOOGLE_SHEET_ID:                 ${{ secrets.GOOGLE_SHEET_ID }}
+          GOOGLE_SERVICE_ACCOUNT_JSON_B64: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON_B64 }}
+          TELEGRAM_BOT_TOKEN:              ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID:                ${{ secrets.TELEGRAM_CHAT_ID }}
+          GH_PAT:                          ${{ secrets.GH_PAT }}
+          GH_REPO:                         ${{ github.repository }}
+        run: python phase5_6/scripts/weekly_backup.py
+
+      - name: Operational backup (DBs + logs)
+        env:
+          GH_PAT:                      ${{ secrets.GH_PAT }}
+          GH_REPO:                     ${{ github.repository }}
+          LEARNING_LAYER_DATABASE_URL: ${{ secrets.LEARNING_LAYER_DATABASE_URL }}
+          KCL_DATABASE_URL:            ${{ secrets.KCL_DATABASE_URL }}
+          P10_DATABASE_URL:            ${{ secrets.P10_DATABASE_URL }}
+          BACKUP_RETENTION_DAYS:       "30"
+          TELEGRAM_BOT_TOKEN:          ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID:            ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: python -c "from operational.backup import run_backup; run_backup()"
+
+      - name: Notify failure
+        if: failure()
+        uses: appleboy/telegram-action@master
+        with:
+          to: ${{ secrets.TELEGRAM_CHAT_ID }}
+          token: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          message: "🔴 Backup FAILED\n${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"

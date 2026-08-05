@@ -1,0 +1,41 @@
+name: Decision Layer
+
+on:
+  schedule:
+    - cron: "30 1 * * *"   # 04:30 Asia/Baghdad
+  workflow_dispatch:
+
+concurrency:
+  group: decision
+  cancel-in-progress: false
+
+jobs:
+  decision:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.11", cache: pip}
+      - run: pip install -r requirements.txt --quiet
+      - name: Run decision layer
+        env:
+          SUPABASE_URL:        ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
+          TELEGRAM_BOT_TOKEN:  ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID:    ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          python -c "
+          import sys; sys.path.insert(0,'.')
+          import phase5_6
+          from core.container import container
+          from core.event_bus import event_bus
+          print('Decision layer ready — bindings:', len(container._bindings))
+          "
+      - name: Notify failure
+        if: failure()
+        uses: appleboy/telegram-action@master
+        with:
+          to: ${{ secrets.TELEGRAM_CHAT_ID }}
+          token: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          message: "🔴 Decision Layer FAILED\n${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
