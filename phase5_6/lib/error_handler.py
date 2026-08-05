@@ -35,7 +35,8 @@ def create_fix_pr(gemini_client, github_pat: str, github_repo: str,
                    file_path: str, error_message: str, code_snippet: str, date_str: str) -> str:
     """Creates a branch with a Gemini-suggested fix and opens a PR.
     Returns the PR URL. Never merges automatically."""
-    suggested_fix = gemini_client.diagnose_error(error_message, code_snippet)
+    error_log = f"{error_message}\n\nCode context / snippet:\n{code_snippet}"
+    suggested_fix = gemini_client.diagnose_workflow_error(error_log)
 
     import time
     import uuid
