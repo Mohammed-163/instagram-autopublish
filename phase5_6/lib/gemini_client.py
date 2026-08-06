@@ -217,10 +217,10 @@ class GeminiClient:
                     f"Cannot read candidate image {path!r}: {exc}"
                 ) from exc
             parts.append(genai_types.Part.from_bytes(data=image_bytes, mime_type="image/jpeg"))
-            parts.append(genai_types.Part.from_text(f"[صورة {i + 1}]"))
+            parts.append(genai_types.Part.from_text(text=f"[صورة {i + 1}]"))
 
         n = len(image_paths)
-        parts.append(genai_types.Part.from_text(
+        parts.append(genai_types.Part.from_text(text=(
             f'من الصور أعلاه ({n} صورة مُرقَّمة من 1 إلى {n})، '
             f'اختر أفضل صورة خلفية لمنشور انستغرام عن: "{topic}".\n'
             f'شروط القبول: الصورة لائقة، خالية من محتوى غير لائق (كحول/عري/عنف)، '
@@ -228,7 +228,7 @@ class GeminiClient:
             f'إذا لم تجد أي صورة مقبولة اختر selected_index: -1.\n'
             f'أخرج JSON فقط:\n'
             f'{{"selected_index": <عدد صحيح 1-{n} أو -1>, "reason": "..."}}'
-        ))
+        )))
 
         # Call Gemini Vision (bypasses rotation engine — intentional: image vetting
         # must not consume text-generation quota).
