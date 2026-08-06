@@ -128,14 +128,17 @@ class GeminiClient:
         raw = self._call_with_fallback(prompt)
         return self._extract_json(raw)
 
-    def build_monthly_plan(self, performance_data: str, current_plan: str) -> dict:
+    def build_monthly_plan(self, performance_data: str, competitor_data: str, date_str: str) -> dict:
         prompt = f"""أنت مستشار استراتيجي لمنصة انستغرام متخصصة بالمحتوى النفسي.
 
 بيانات الأداء الشهري:
 {performance_data}
 
-الخطة الحالية:
-{current_plan}
+بيانات المنافسين:
+{competitor_data}
+
+الشهر المستهدف:
+{date_str}
 
 بناءً على البيانات أعلاه، اقترح خطة شهر قادم محسّنة.
 أخرج JSON فقط:
