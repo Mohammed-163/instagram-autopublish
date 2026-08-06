@@ -27,12 +27,11 @@ def _env_bool(name: str, default: bool) -> bool:
     return val.strip().lower() in ("1", "true", "yes", "on")
 
 def _resolve_p10_db_url() -> str:
-    v = os.environ.get("P10_DATABASE_URL", "")
-    if v: return v
-    v = os.environ.get("DATABASE_URL", "")
-    if v: return v
-    if os.environ.get("ALLOW_SQLITE_FALLBACK", "").lower() in ("1", "true", "yes"):
-        return "sqlite:///phase10_intelligence_core.db"
+    # Priority: LEARNING_LAYER_DATABASE_URL → KCL_DATABASE_URL → P10_DATABASE_URL
+    #           → DATABASE_URL → derived from SUPABASE_URL + SUPABASE_SECRET_KEY
+    for var in ("LEARNING_LAYER_DATABASE_URL", "KCL_DATABASE_URL", "P10_DATABASE_URL"):
+        v = os.environ.get(var, "")
+        if v: return v
     _root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     if _root not in sys.path:
         sys.path.insert(0, _root)
