@@ -31,12 +31,49 @@ class UnexpectedError(Exception):
     pass
 
 
+def _coerce_diagnosis_to_str(raw_diagnosis, original_error_message: str) -> str:
+    """Safely convert whatever diagnose_workflow_error() returned into a plain str.
+
+    diagnose_workflow_error() is typed to return str, but in practice the
+    underlying SDK may return None (blocked response, empty candidate) or leak
+    a non-string wrapper object.  Calling .encode() on such a value raises
+    AttributeError, which was previously reported to Telegram as the cryptic
+    message "'object'" — losing the original error context entirely.
+
+    This function guarantees a non-None str in all cases and embeds the
+    original error log whenever the diagnosis is absent or of unexpected type,
+    so the PR body always contains actionable information.
+    """
+    if isinstance(raw_diagnosis, str) and raw_diagnosis.strip():
+        return raw_diagnosis
+
+    header = "# Gemini diagnosis unavailable\n"
+    if raw_diagnosis is None:
+        reason = "# (diagnose_workflow_error returned None — likely an empty/blocked SDK response)\n"
+    else:
+        reason = (
+            f"# (unexpected return type: {type(raw_diagnosis).__name__!r}, "
+            f"repr={raw_diagnosis!r})\n"
+        )
+
+    original_lines = "\n".join(
+        f"# {line}" for line in original_error_message.splitlines()
+    )
+    return f"{header}{reason}\n# Original error log:\n{original_lines}"
+
+
 def create_fix_pr(gemini_client, github_pat: str, github_repo: str,
                    file_path: str, error_message: str, code_snippet: str, date_str: str) -> str:
     """Creates a branch with a Gemini-suggested fix and opens a PR.
     Returns the PR URL. Never merges automatically."""
     error_log = f"{error_message}\n\nCode context / snippet:\n{code_snippet}"
-    suggested_fix = gemini_client.diagnose_workflow_error(error_log)
+    raw_diagnosis = gemini_client.diagnose_workflow_error(error_log)
+
+    # Normalize to str — diagnose_workflow_error may return None or a non-string
+    # SDK object depending on the Gemini response.  The subsequent .encode("utf-8")
+    # call crashes with AttributeError on any non-str value, which was previously
+    # swallowed and reported to Telegram as the useless message "'object'".
+    suggested_fix = _coerce_diagnosis_to_str(raw_diagnosis, error_message)
 
     import time
     import uuid
@@ -102,15 +139,28 @@ def create_fix_pr(gemini_client, github_pat: str, github_repo: str,
 def handle_unexpected(notifier, gemini_client, github_pat: str, github_repo: str,
                        file_path: str, code_snippet: str, date_str: str) -> None:
     """Call from an except block. Captures the current exception, gets a
-    Gemini fix suggestion, opens a PR, and notifies via Telegram."""
+    Gemini fix suggestion, opens a PR, and notifies via Telegram.
+
+    The original traceback is captured at the top of this function, before any
+    nested try/except can overwrite it.  If the PR mechanism itself fails, the
+    Telegram alert includes both the original error AND the full PR-error
+    traceback — never just the cryptic str() of the exception object.
+    """
+    # Capture the original traceback immediately — must happen before any
+    # nested exception handling can reset the current exception context.
     error_message = traceback.format_exc()
+
     try:
         pr_url = create_fix_pr(gemini_client, github_pat, github_repo, file_path,
                                 error_message, code_snippet, date_str)
         notifier.alert_pr(error_message[:300], pr_url)
-    except Exception as pr_error:
-        # If even the auto-fix-PR flow fails, fall back to a plain critical alert
+    except Exception:
+        # Capture the PR-mechanism traceback separately so both error paths
+        # appear in the Telegram alert.  Using traceback.format_exc() here (not
+        # str(pr_error)) ensures the full stack trace is included, not just the
+        # exception message — which was the root cause of the "'object'" reports.
+        pr_error_detail = traceback.format_exc()
         notifier.alert_critical(
             "فشل خطأ غير متوقع + فشلت آلية اقتراح الإصلاح أيضاً",
-            f"الخطأ الأصلي:\n{error_message[:500]}\n\nخطأ آلية PR:\n{pr_error}",
+            f"الخطأ الأصلي:\n{error_message[:500]}\n\nخطأ آلية PR:\n{pr_error_detail[:900]}",
         )
