@@ -27,6 +27,12 @@ class AllKeysExhaustedError(Exception):
     """Raised when every key×model combination is exhausted."""
 
 
+class ImageVettingError(Exception):
+    """Raised when the Gemini Vision image-vetting call fails (API error, bad key,
+    unreadable file, or unparseable response).  Distinct from a *rejection* result
+    (selected_index == -1), which is a normal outcome and returns None instead."""
+
+
 class GeminiClient:
     """
     Drop-in replacement backed by GeminiRotationEngine.
@@ -154,43 +160,113 @@ class GeminiClient:
 3. كيفية منع تكراره"""
         return self._call_with_fallback(prompt)
 
-    def select_best_image(self, images: list, topic: str) -> dict | None:
-        """Use the dedicated image-check key (never competes for text quota)."""
-        if not images:
+    def select_best_image(self, image_paths: list, topic: str) -> str | None:
+        """Vet candidate background images via Gemini Vision and return the path
+        of the best acceptable one, or None if no candidate passes vetting.
+
+        Args:
+            image_paths: Local file paths returned by PixabayClient.download_candidates().
+            topic: Human-readable topic summary used for relevance and compliance scoring.
+
+        Returns:
+            The file path of the selected image, or None if Gemini rejects every
+            candidate (selected_index == -1) or the list is empty.
+
+        Raises:
+            ImageVettingError: If the Gemini Vision API call itself fails, or a
+                               candidate image file cannot be read.  Callers must NOT
+                               silently fall back to the first image on this error.
+        """
+        if not image_paths:
             return None
 
-        image_check_key = self._engine.image_check_key
-        if not image_check_key:
-            # Fallback to rotation engine if no dedicated key
-            image_check_key = None
-
-        descriptions = "\n".join(
-            f"{i+1}. {img.get('tags', '')} — {img.get('pageURL', '')}"
-            for i, img in enumerate(images)
-        )
-        prompt = f"""اختر أفضل صورة خلفية لمنشور انستغرام عن: "{topic}"
-
-الصور المتاحة:
-{descriptions}
-
-أخرج JSON فقط:
-{{"selected_index": 1, "reason": "..."}}"""
-
         try:
-            if image_check_key:
-                # Use dedicated image key directly
-                from google import genai
-                client = genai.Client(api_key=image_check_key)
-                resp = client.models.generate_content(
-                    model=config.IMAGE_VETTING_MODEL, contents=prompt
+            from google import genai
+            from google.genai import types as genai_types
+        except ImportError as exc:
+            raise ImageVettingError(
+                "google-genai is required for image vetting: pip install google-genai"
+            ) from exc
+
+        # Prefer the dedicated image-check key so vetting never competes with
+        # text-generation quota.  Fall back to the first available rotation key.
+        api_key = self._engine.image_check_key
+        if not api_key:
+            available = [k for k in self._engine.api_keys if k]
+            if not available:
+                raise ImageVettingError(
+                    "No Gemini API key available for image vetting "
+                    "(set GEMINI_API_KEY_IMAGE_CHECK or at least one GEMINI_API_KEY_N)."
                 )
-                raw = resp.text
-            else:
-                raw = self._call_with_fallback(prompt)
+            api_key = available[0]
+
+        # Build a multimodal content list: one image-bytes part + label per candidate,
+        # then a single text instruction.
+        # The previous implementation called img.get('tags', ...) on string paths —
+        # that raised AttributeError which was silently swallowed by a bare
+        # 'except Exception: pass', causing the first image to always be returned
+        # without any real vetting.  Here we send the actual JPEG bytes so Gemini
+        # can inspect the images directly.
+        parts = []
+        for i, path in enumerate(image_paths):
+            try:
+                with open(path, "rb") as fh:
+                    image_bytes = fh.read()
+            except OSError as exc:
+                raise ImageVettingError(
+                    f"Cannot read candidate image {path!r}: {exc}"
+                ) from exc
+            parts.append(genai_types.Part.from_bytes(data=image_bytes, mime_type="image/jpeg"))
+            parts.append(genai_types.Part.from_text(f"[صورة {i + 1}]"))
+
+        n = len(image_paths)
+        parts.append(genai_types.Part.from_text(
+            f'من الصور أعلاه ({n} صورة مُرقَّمة من 1 إلى {n})، '
+            f'اختر أفضل صورة خلفية لمنشور انستغرام عن: "{topic}".\n'
+            f'شروط القبول: الصورة لائقة، خالية من محتوى غير لائق (كحول/عري/عنف)، '
+            f'ومناسبة بصرياً للموضوع.\n'
+            f'إذا لم تجد أي صورة مقبولة اختر selected_index: -1.\n'
+            f'أخرج JSON فقط:\n'
+            f'{{"selected_index": <عدد صحيح 1-{n} أو -1>, "reason": "..."}}'
+        ))
+
+        # Call Gemini Vision (bypasses rotation engine — intentional: image vetting
+        # must not consume text-generation quota).
+        try:
+            client = genai.Client(api_key=api_key)
+            resp = client.models.generate_content(
+                model=config.IMAGE_VETTING_MODEL,
+                contents=parts,
+            )
+            raw = resp.text
+            if raw is None:
+                raise ImageVettingError(
+                    "Gemini returned an empty response during image vetting "
+                    f"(model={config.IMAGE_VETTING_MODEL})."
+                )
+        except ImageVettingError:
+            raise
+        except Exception as exc:
+            raise ImageVettingError(
+                f"Gemini Vision API call failed during image vetting: {exc}"
+            ) from exc
+
+        # Parse the 1-based index returned by Gemini.
+        try:
             result = self._extract_json(raw)
-            idx = int(result.get("selected_index", 1)) - 1
-            if 0 <= idx < len(images):
-                return images[idx]
-        except Exception:
-            pass
-        return images[0] if images else None
+            raw_idx = int(result.get("selected_index", -1))
+        except (json.JSONDecodeError, ValueError, TypeError) as exc:
+            raise ImageVettingError(
+                f"Cannot parse Gemini image-selection response: {raw!r}"
+            ) from exc
+
+        if raw_idx == -1:
+            # Gemini explicitly rejected every candidate.
+            return None
+
+        idx = raw_idx - 1  # convert 1-based (Gemini) → 0-based (Python)
+        if 0 <= idx < len(image_paths):
+            return image_paths[idx]
+
+        # Gemini returned an out-of-range index — treat as rejection.
+        return None
