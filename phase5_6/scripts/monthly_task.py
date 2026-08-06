@@ -76,8 +76,27 @@ def main():
         step_start = time.time()
         gemini_keys = [config.optional_env("GEMINI_API_KEY_1"), config.optional_env("GEMINI_API_KEY_2"), config.optional_env("GEMINI_API_KEY_3")]
         gemini = GeminiClient(gemini_keys)
-        plan_rows = gemini.build_monthly_plan({"posts": performance_rows}, competitor_data, date_str)
+        plan_dict = gemini.build_monthly_plan({"posts": performance_rows}, competitor_data, date_str)
         print(f"    ✓ 30-day plan generated successfully (الوقت المنقضي: {time.time() - step_start:.2f} ثانية)")
+
+        # Convert Gemini dict to 2D rows matching CURRENT_PLAN_HEADERS:
+        # ["date","post_count","post_1_type","post_1_time","post_1_bg_keywords","post_1_bg_file_id",
+        #  "post_2_type","post_2_time","post_2_bg_keywords","post_2_bg_file_id",
+        #  "post_3_type","post_3_time","post_3_bg_keywords","post_3_bg_file_id"]
+        from datetime import timedelta
+        recommended_topics = plan_dict.get("recommended_topics", [])
+        post_frequency     = plan_dict.get("post_frequency", "daily")
+        post_count         = 2 if "twice" in str(post_frequency).lower() else 1
+        base_date = datetime.strptime(date_str[:7], "%Y-%m")
+        plan_rows = []
+        for i, topic in enumerate(recommended_topics):
+            row_date = (base_date + timedelta(days=i)).strftime("%Y-%m-%d")
+            plan_rows.append([
+                row_date, str(post_count),
+                "reel", "09:00", topic, "",   # post_1
+                "",      "",      "",    "",   # post_2
+                "",      "",      "",    "",   # post_3
+            ])
 
         # 4. Archive + write new plan
         print("4/5 — Archiving old plan and writing new one...")
