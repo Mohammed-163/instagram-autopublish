@@ -15,7 +15,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from lib import config
 from lib.error_handler import handle_unexpected, CriticalError, RecoverableError
-from lib.gemini_client import GeminiClient, AllKeysExhaustedError
+from lib.gemini_client import GeminiClient, AllKeysExhaustedError, ImageVettingError
 from lib.pixabay_client import PixabayClient
 from lib.video_creator import VideoCreator
 from lib.drive_client import DriveClient
@@ -201,6 +201,12 @@ def main():
 
             except AllKeysExhaustedError as e:
                 raise CriticalError(f"كل مفاتيح Gemini استُنفدت: {e}")
+            except ImageVettingError as e:
+                # Image vetting is a hard prerequisite: we must not publish
+                # without a vetted background image.  Escalate to CriticalError
+                # so the whole day's run stops immediately rather than silently
+                # skipping the image-selection step.
+                raise CriticalError(f"فشل فحص الصور عبر Gemini Vision: {e}")
             except Exception:
                 handle_unexpected(
                     notifier, gemini,
