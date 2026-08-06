@@ -143,7 +143,12 @@ def bootstrap():
 
 
 if __name__ == "__main__":
-    components = bootstrap()
-    print("\nBootstrap complete. Active components:")
-    for name in components:
-        print(f"  ✓ {name}")
+    try:
+        components = bootstrap()
+        print("\nBootstrap complete. Active components:")
+        for name in components:
+            print(f"  ✓ {name}")
+    except Exception:
+        import traceback
+        traceback.print_exc()
+        sys.exit(1)
