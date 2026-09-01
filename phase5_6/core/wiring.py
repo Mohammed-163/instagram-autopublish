@@ -36,6 +36,8 @@ Architectural rules enforced here:
 """
 from __future__ import annotations
 
+phase7_bootstrap = None
+
 from core.event_bus import EventBus, event_bus as default_event_bus
 from core.events import (
     PostPublished,
@@ -59,6 +61,7 @@ from core.events import (
 
 
 def wire_default_subscribers(bus: EventBus = default_event_bus) -> None:
+    global phase7_bootstrap
     # ------------------------------------------------------------------ Services
     from database.services.audit_service import audit_service
     from database.services.confidence_service import confidence_service
@@ -301,7 +304,8 @@ def wire_default_subscribers(bus: EventBus = default_event_bus) -> None:
         from observation.application.bootstrap import ApplicationBootstrap
         from observation.config import load_settings as _load_obs_settings
         _obs_bootstrap = ApplicationBootstrap(_load_obs_settings())
-        _wire_exec_obs(bus, _obs_bootstrap)
+        phase7_bootstrap = _obs_bootstrap
+        _wire_exec_obs(bus, phase7_bootstrap)
     except Exception:
         import logging as _logging
         _logging.getLogger("core.wiring").warning(
