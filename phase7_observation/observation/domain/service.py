@@ -93,6 +93,7 @@ class ObservationService:
                 observation_id=recorded.id,
                 fingerprint=fingerprint.value,
                 tenant_id=event.tenant_id,
+                payload=dict(event.payload),
             )
         )
         return recorded
