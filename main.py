@@ -54,7 +54,33 @@ import phase10_intelligence  # noqa: F401
 
 
 # ---------------------------------------------------------------------------
-# 5. Build Phase8 container
+# 5. Ensure shared runtime tables exist
+# ---------------------------------------------------------------------------
+def _ensure_runtime_schemas():
+    """Create missing ORM tables for the in-process pipeline components."""
+    from database.client import get_engine
+    from database.models import Base as Phase56Base
+
+    Phase56Base.metadata.create_all(get_engine())
+
+    from observation.config import load_settings as load_observation_settings
+    from observation.infrastructure.db.connection import DatabaseConnectionFactory
+    from observation.infrastructure.orm.models import Base as ObservationBase
+
+    observation_factory = DatabaseConnectionFactory(
+        load_observation_settings().database
+    )
+    try:
+        ObservationBase.metadata.create_all(observation_factory.engine())
+    finally:
+        observation_factory.dispose()
+
+
+_ensure_runtime_schemas()
+
+
+# ---------------------------------------------------------------------------
+# 6. Build Phase8 container
 # ---------------------------------------------------------------------------
 def _bootstrap_phase8():
     from infrastructure.container import Container as P8Container
@@ -65,7 +91,7 @@ def _bootstrap_phase8():
 
 
 # ---------------------------------------------------------------------------
-# 6. Build Phase9 container
+# 7. Build Phase9 container
 # ---------------------------------------------------------------------------
 def _bootstrap_phase9():
     from application.container import build_container
@@ -75,7 +101,7 @@ def _bootstrap_phase9():
 
 
 # ---------------------------------------------------------------------------
-# 7. Build Phase10 application
+# 8. Build Phase10 application
 # ---------------------------------------------------------------------------
 def _bootstrap_phase10():
     from phase10_intelligence.bootstrap.app import create_application
@@ -85,7 +111,7 @@ def _bootstrap_phase10():
 
 
 # ---------------------------------------------------------------------------
-# 8. Wire remaining inter-phase bridges (Phase7→8, Phase8→9, Phase9→10)
+# 9. Wire remaining inter-phase bridges (Phase7→8, Phase8→9, Phase9→10)
 # ---------------------------------------------------------------------------
 def _wire_bridges(p8_container, p9_container, p10_app):
     # Phase7 bootstrap (already wired Phase6→Phase7 inside wiring.py)
@@ -124,7 +150,7 @@ def _wire_bridges(p8_container, p9_container, p10_app):
 
 
 # ---------------------------------------------------------------------------
-# 9. Main bootstrap
+# 10. Main bootstrap
 # ---------------------------------------------------------------------------
 def bootstrap():
     p8 = _bootstrap_phase8()
