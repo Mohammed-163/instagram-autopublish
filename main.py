@@ -95,7 +95,7 @@ def _wire_bridges(p8_container, p9_container, p10_app):
         p7 = ApplicationBootstrap(_obs_cfg())
         # Phase7 → Phase8
         from bridges.observation_to_learning import wire as wire_obs_learn
-        from application.main import run as p8_run
+        from phase8_learning.main import run as p8_run
         wire_obs_learn(p7.in_process_publisher, p8_run)
         logger.info("Bridge Phase7→Phase8 wired.")
     except Exception:
