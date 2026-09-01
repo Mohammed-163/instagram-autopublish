@@ -21,9 +21,9 @@ def main() -> int:
 
     print("    Initialising Phase 5/6 event-log schema...")
     from database.client import get_engine
-    from database.models import Base as Phase56Base
+    from database.models.event_log import EventLog
 
-    Phase56Base.metadata.create_all(get_engine())
+    EventLog.__table__.create(get_engine(), checkfirst=True)
 
     print("    Initialising Phase 7 observation schema...")
     from observation.config import load_settings as load_observation_settings
@@ -34,7 +34,9 @@ def main() -> int:
         load_observation_settings().database
     )
     try:
-        ObservationBase.metadata.create_all(observation_factory.engine())
+        ObservationBase.metadata.tables["observations"].create(
+            observation_factory.engine(), checkfirst=True
+        )
     finally:
         observation_factory.dispose()
 
