@@ -62,9 +62,24 @@ class EventBus:
         if self._event_log is None:
             return
         try:
-            self._event_log.log(event_type=event.event_type, source=type(event).__module__, payload=event.payload())
+            self._event_log.log(
+                event_type=event.event_type,
+                source=type(event).__module__,
+                payload=_json_safe(event.payload()),
+            )
         except Exception:
             logger.exception("Failed to persist event %s to the event log", event.event_type)
+
+
+def _json_safe(value):
+    """Convert values such as UUIDs and datetimes to JSON-safe primitives."""
+    if isinstance(value, dict):
+        return {key: _json_safe(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_json_safe(item) for item in value]
+    if hasattr(value, "isoformat"):
+        return value.isoformat()
+    return str(value) if value.__class__.__module__ == "uuid" else value
 
 
 class EventLogWriter:
