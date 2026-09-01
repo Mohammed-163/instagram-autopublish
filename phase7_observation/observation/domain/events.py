@@ -39,6 +39,7 @@ class ObservationRecorded(DomainEvent):
     observation_id: UUID
     fingerprint: str
     tenant_id: str
+    payload: Dict[str, Any] = field(default_factory=dict)
     event_type: str = field(default="observation.recorded", init=False)
 
     def __post_init__(self) -> None:
