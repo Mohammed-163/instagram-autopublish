@@ -4,6 +4,12 @@ on:
   schedule:
     - cron: "0 0 * * *"   # 03:00 Asia/Baghdad
   workflow_dispatch:
+    inputs:
+      run_pipeline_test:
+        description: "Run the manual Phase 6 → Phase 7 → Phase 8 pipeline test"
+        required: true
+        default: false
+        type: boolean
 
 concurrency:
   group: learning
@@ -19,6 +25,7 @@ jobs:
         with: {python-version: "3.11", cache: pip}
       - run: pip install -r requirements.txt --quiet
       - name: Run full AI pipeline (Phases 8-10)
+        if: ${{ github.event_name != 'workflow_dispatch' || inputs.run_pipeline_test != true }}
         env:
           DATABASE_URL:                ${{ secrets.DATABASE_URL }}
           SUPABASE_URL:                ${{ secrets.SUPABASE_URL }}
@@ -29,6 +36,18 @@ jobs:
           TELEGRAM_BOT_TOKEN:          ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID:            ${{ secrets.TELEGRAM_CHAT_ID }}
         run: python main.py
+      - name: Run manual full pipeline test (Phases 6-8)
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.run_pipeline_test == true }}
+        env:
+          DATABASE_URL:                ${{ secrets.DATABASE_URL }}
+          SUPABASE_URL:                ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SECRET_KEY:         ${{ secrets.SUPABASE_SECRET_KEY }}
+          LEARNING_LAYER_DATABASE_URL: ${{ secrets.LEARNING_LAYER_DATABASE_URL }}
+          KCL_DATABASE_URL:            ${{ secrets.KCL_DATABASE_URL }}
+          P10_DATABASE_URL:            ${{ secrets.P10_DATABASE_URL }}
+          TELEGRAM_BOT_TOKEN:          ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID:            ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: python scripts/test_full_pipeline_manual.py
       - name: Notify failure
         if: failure()
         uses: appleboy/telegram-action@master
