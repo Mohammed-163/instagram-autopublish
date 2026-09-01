@@ -1,0 +1,119 @@
+"""Manual end-to-end test for the Phase 6 -> Phase 7 -> Phase 8 pipeline."""
+from __future__ import annotations
+
+import sys
+import time
+import uuid
+from pathlib import Path
+
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
+
+EXPECTED_METRICS = ("reach", "saved", "likes", "comments", "shares")
+
+
+def main() -> int:
+    print("[1/5] Importing main bootstrap and building Phase 5/6, 7, and 8...")
+    import main as unified_main
+
+    p8_container = unified_main._bootstrap_phase8()
+    p9_container = unified_main._bootstrap_phase9()
+    p10_app = unified_main._bootstrap_phase10()
+
+    print("[2/5] Temporarily wrapping Phase 8 run to capture translated metrics...")
+    import phase8_learning.main as phase8_main
+
+    original_p8_run = phase8_main.run
+    captured_events = []
+    p8_results = []
+
+    def capturing_p8_run(observations, settings=None):
+        batch = list(observations)
+        captured_events.extend(batch)
+        print(
+            "    Phase 8 received "
+            f"{len(batch)} event(s): "
+            f"{[getattr(item, 'metric_name', None) for item in batch]}"
+        )
+        result = original_p8_run(batch, settings=settings)
+        p8_results.extend(result)
+        return result
+
+    phase8_main.run = capturing_p8_run
+    unified_main._wire_bridges(p8_container, p9_container, p10_app)
+
+    print("[3/5] Creating synthetic Phase 6 ExecutionCompleted event...")
+    from core.events import ExecutionCompleted
+    from core.event_bus import event_bus
+
+    execution_id = uuid.uuid4()
+    event = ExecutionCompleted(
+        execution_id=execution_id,
+        decision_candidate_id=None,
+        execution_type="test_manual_pipeline",
+        result={
+            "reach": 1234,
+            "saved": 87,
+            "likes": 210,
+            "comments": 15,
+            "shares": 4,
+            "topic_slug": "test-topic",
+            "hook_line": "هل تعلم أن هذا اختبار؟",
+        },
+    )
+
+    print(
+        f"    Publishing execution_id={execution_id} "
+        "through Phase 6 event bus..."
+    )
+    event_bus.publish(event)
+    time.sleep(0.1)
+    phase8_main.run = original_p8_run
+
+    print("[4/5] Verifying Phase 7 and Phase 8 results...")
+    observation_ids = sorted(
+        {str(getattr(item, "observation_id", "")) for item in captured_events}
+    )
+    metric_names = [
+        getattr(item, "metric_name", "")
+        for item in captured_events
+    ]
+    real_metrics = [
+        name for name in metric_names
+        if name in EXPECTED_METRICS
+    ]
+    fallback_detected = "observation_recorded" in metric_names
+
+    print(f"    Phase 7 observation_id(s): {observation_ids or 'none'}")
+    print(f"    Phase 8 metric count: {len(captured_events)}")
+    print(f"    Phase 8 metric names: {metric_names}")
+    print(f"    Phase 8 knowledge result count: {len(p8_results)}")
+
+    passed = (
+        len(observation_ids) == 1
+        and len(real_metrics) == 5
+        and sorted(real_metrics) == sorted(EXPECTED_METRICS)
+        and not fallback_detected
+    )
+
+    print("[5/5] Final result...")
+    if passed:
+        print(
+            f"✅ PIPELINE TEST PASSED: "
+            f"{len(real_metrics)} real metrics processed"
+        )
+        return 0
+
+    print(
+        "❌ PIPELINE TEST FAILED: "
+        "fallback metric detected or invalid results: "
+        f"observation_ids={observation_ids}, metrics={metric_names}"
+    )
+    return 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
