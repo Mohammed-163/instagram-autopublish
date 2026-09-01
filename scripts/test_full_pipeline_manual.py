@@ -19,6 +19,19 @@ def main() -> int:
     print("[1/5] Importing main bootstrap and building Phase 5/6, 7, and 8...")
     import main as unified_main
 
+    print("    Initialising Phase 7 observation schema...")
+    from observation.config import load_settings as load_observation_settings
+    from observation.infrastructure.db.connection import DatabaseConnectionFactory
+    from observation.infrastructure.orm.models import Base as ObservationBase
+
+    observation_factory = DatabaseConnectionFactory(
+        load_observation_settings().database
+    )
+    try:
+        ObservationBase.metadata.create_all(observation_factory.engine())
+    finally:
+        observation_factory.dispose()
+
     p8_container = unified_main._bootstrap_phase8()
     p9_container = unified_main._bootstrap_phase9()
     p10_app = unified_main._bootstrap_phase10()
