@@ -20,6 +20,7 @@ jobs:
       - run: pip install -r requirements.txt --quiet
       - name: Run full AI pipeline (Phases 8-10)
         env:
+          DATABASE_URL:                ${{ secrets.DATABASE_URL }}
           SUPABASE_URL:                ${{ secrets.SUPABASE_URL }}
           SUPABASE_SECRET_KEY:         ${{ secrets.SUPABASE_SECRET_KEY }}
           LEARNING_LAYER_DATABASE_URL: ${{ secrets.LEARNING_LAYER_DATABASE_URL }}
