@@ -6,7 +6,6 @@ from __future__ import annotations
 import logging
 from numbers import Number
 from typing import Any, Callable, Iterable, List
-from uuid import UUID
 
 logger = logging.getLogger("bridges.observation_to_learning")
 
@@ -33,44 +32,7 @@ def _translate(phase7_event: object) -> List[object]:
     tenant_id = str(getattr(phase7_event, "tenant_id", "system"))
     fingerprint = str(getattr(phase7_event, "fingerprint", ""))
 
-    observation = None
-    session = None
-    db_factory = None
-
-    try:
-        from observation.config import load_settings
-        from observation.infrastructure.db.connection import (
-            DatabaseConnectionFactory,
-        )
-        from observation.infrastructure.repository.observation_repository import (
-            SQLAlchemyObservationRepository,
-        )
-
-        db_factory = DatabaseConnectionFactory(load_settings().database)
-        session = db_factory.new_session()
-
-        repository = SQLAlchemyObservationRepository(session)
-        observation = repository.find_by_id(UUID(observation_id))
-
-    except Exception:
-        logger.warning(
-            "observation_to_learning: could not load Observation %s; "
-            "using fallback",
-            observation_id,
-            exc_info=True,
-        )
-
-    finally:
-        if session is not None:
-            session.close()
-
-        if db_factory is not None:
-            db_factory.dispose()
-
-    if observation is None:
-        return [_fallback_event(phase7_event, P8ObservationRecorded)]
-
-    payload = getattr(observation, "payload", {})
+    payload = getattr(phase7_event, "payload", {})
     result = payload.get("result", {}) if isinstance(payload, dict) else {}
 
     if not isinstance(result, dict):
