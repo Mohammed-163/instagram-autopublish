@@ -65,10 +65,7 @@ def main() -> int:
         },
     )
 
-    print(
-        f"    Publishing execution_id={execution_id} "
-        "through Phase 6 event bus..."
-    )
+    print(f"    Publishing execution_id={execution_id} through Phase 6 event bus...")
     event_bus.publish(event)
     time.sleep(0.1)
     phase8_main.run = original_p8_run
@@ -77,14 +74,8 @@ def main() -> int:
     observation_ids = sorted(
         {str(getattr(item, "observation_id", "")) for item in captured_events}
     )
-    metric_names = [
-        getattr(item, "metric_name", "")
-        for item in captured_events
-    ]
-    real_metrics = [
-        name for name in metric_names
-        if name in EXPECTED_METRICS
-    ]
+    metric_names = [getattr(item, "metric_name", "") for item in captured_events]
+    real_metrics = [name for name in metric_names if name in EXPECTED_METRICS]
     fallback_detected = "observation_recorded" in metric_names
 
     print(f"    Phase 7 observation_id(s): {observation_ids or 'none'}")
@@ -101,15 +92,12 @@ def main() -> int:
 
     print("[5/5] Final result...")
     if passed:
-        print(
-            f"✅ PIPELINE TEST PASSED: "
-            f"{len(real_metrics)} real metrics processed"
-        )
+        print(f"✅ PIPELINE TEST PASSED: {len(real_metrics)} real metrics processed")
         return 0
 
     print(
         "❌ PIPELINE TEST FAILED: "
-        "fallback metric detected or invalid results: "
+        f"fallback metric detected or invalid results: "
         f"observation_ids={observation_ids}, metrics={metric_names}"
     )
     return 1
