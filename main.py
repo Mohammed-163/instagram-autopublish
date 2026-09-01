@@ -118,14 +118,13 @@ def _bootstrap_phase10():
 def _wire_bridges(p8_container, p9_container, p10_app):
     # Phase7 bootstrap (already wired Phase6→Phase7 inside wiring.py)
     try:
-        from observation.config import load_settings as _obs_cfg
-        from observation.application.bootstrap import ApplicationBootstrap
-        p7 = ApplicationBootstrap(_obs_cfg())
-        from core.events import ExecutionCompleted as _P6ExecutionCompleted
-        from bridges.execution_to_observation import wire as _wire_exec_obs
-
-        subscribers = getattr(_p56_bus, "_subscribers", {})
-        if not subscribers.get(_P6ExecutionCompleted):
+        from core import wiring as _core_wiring
+        p7 = getattr(_core_wiring, "phase7_bootstrap", None)
+        if p7 is None:
+            from observation.config import load_settings as _obs_cfg
+            from observation.application.bootstrap import ApplicationBootstrap
+            p7 = ApplicationBootstrap(_obs_cfg())
+            from bridges.execution_to_observation import wire as _wire_exec_obs
             _wire_exec_obs(_p56_bus, p7)
             logger.info("Bridge Phase6→Phase7 wired from unified bootstrap.")
 
