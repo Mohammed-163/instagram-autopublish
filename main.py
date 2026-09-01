@@ -57,11 +57,11 @@ import phase10_intelligence  # noqa: F401
 # 5. Ensure shared runtime tables exist
 # ---------------------------------------------------------------------------
 def _ensure_runtime_schemas():
-    """Create missing ORM tables for the in-process pipeline components."""
+    """Create only the event/observation tables required by the pipeline."""
     from database.client import get_engine
-    from database.models import Base as Phase56Base
+    from database.models.event_log import EventLog
 
-    Phase56Base.metadata.create_all(get_engine())
+    EventLog.__table__.create(get_engine(), checkfirst=True)
 
     from observation.config import load_settings as load_observation_settings
     from observation.infrastructure.db.connection import DatabaseConnectionFactory
@@ -71,7 +71,9 @@ def _ensure_runtime_schemas():
         load_observation_settings().database
     )
     try:
-        ObservationBase.metadata.create_all(observation_factory.engine())
+        ObservationBase.metadata.tables["observations"].create(
+            observation_factory.engine(), checkfirst=True
+        )
     finally:
         observation_factory.dispose()
 
