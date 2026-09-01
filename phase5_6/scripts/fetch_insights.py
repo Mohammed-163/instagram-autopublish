@@ -17,6 +17,7 @@ topics/angles actually performed — not just raw last-30-days media stats.
 """
 import os
 import sys
+import uuid
 from datetime import datetime, timedelta
 
 import requests
@@ -48,6 +49,27 @@ def main():
         return
 
     ig = InstagramClient(config.require_env("IG_ACCESS_TOKEN"), config.require_env("IG_BUSINESS_ID"))
+
+    phase7_bootstrap = None
+    try:
+        import phase7_observation  # noqa: F401 — adds Phase 7 to sys.path
+        from observation.application.bootstrap import ApplicationBootstrap
+        from observation.config import load_settings as load_observation_settings
+        from bridges.observation_to_learning import wire as wire_observation_learning
+        from phase8_learning.main import run as phase8_run
+
+        phase7_bootstrap = ApplicationBootstrap(load_observation_settings())
+        wire_observation_learning(
+            phase7_bootstrap.in_process_publisher,
+            phase8_run,
+        )
+        print("Phase 7 → Phase 8 observation bridge enabled.")
+    except Exception as e:
+        print(
+            "⚠️ Phase 7/8 bridge unavailable; continuing with Sheets only: "
+            f"{e}"
+        )
+
     gemini_keys = [config.optional_env("GEMINI_API_KEY_1"), config.optional_env("GEMINI_API_KEY_2"), config.optional_env("GEMINI_API_KEY_3")]
     gemini = GeminiClient(gemini_keys) if any(gemini_keys) else None
     date_str = datetime.utcnow().strftime("%Y-%m-%d")
@@ -57,6 +79,8 @@ def main():
 
     if not due_posts:
         print("No posts due for insights collection right now.")
+        if phase7_bootstrap is not None:
+            phase7_bootstrap.shutdown()
         return
 
     fetched = 0
@@ -79,6 +103,32 @@ def main():
                 "likes": metrics.get("likes", ""),
                 "comments": metrics.get("comments", ""),
             })
+            if phase7_bootstrap is not None:
+                try:
+                    from observation.domain.events import ExecutionCompleted
+
+                    phase7_bootstrap.handle_event(
+                        ExecutionCompleted(
+                            execution_id=str(uuid.uuid4()),
+                            workflow_id="fetch_insights",
+                            node_id=row.get("topic_slug", "unknown"),
+                            tenant_id="system",
+                            payload={"result": {
+                                "reach": metrics.get("reach"),
+                                "saved": metrics.get("saved"),
+                                "likes": metrics.get("likes"),
+                                "comments": metrics.get("comments"),
+                                "shares": metrics.get("shares"),
+                                "topic_slug": row.get("topic_slug", ""),
+                                "hook_line": row.get("hook_line", ""),
+                            }},
+                        )
+                    )
+                except Exception as e:
+                    print(
+                        "⚠️ Phase 7/8 processing failed; Sheets write succeeded "
+                        f"for {row.get('topic_slug')}: {e}"
+                    )
             sheets.update_row_fields(
                 config.DAILY_LOG_TAB, row_index,
                 {"insights_fetched": "yes"},
@@ -106,6 +156,9 @@ def main():
                     f"خطأ غير متوقع أثناء جلب بيانات الأداء (بدون مفاتيح Gemini للتشخيص الآلي): {row.get('topic_slug', 'unknown')}",
                     "لم يتم إعداد GEMINI_API_KEY_1 — تعذّر إنشاء اقتراح إصلاح آلي.",
                 )
+
+    if phase7_bootstrap is not None:
+        phase7_bootstrap.shutdown()
 
     print(f"Fetched insights for {fetched}/{len(due_posts)} post(s).")
 
