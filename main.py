@@ -205,13 +205,19 @@ def _run_event_flow_test(components):
 
     stack = p8.build_stack()
     try:
-        knowledge = stack.repository.find_active()
-        if not knowledge:
+        from phase8_learning.database.models import KnowledgeModel
+
+        item = (
+            stack.unit_of_work.session.query(KnowledgeModel)
+            .filter(KnowledgeModel.status == "ACTIVE")
+            .order_by(KnowledgeModel.knowledge_id.asc())
+            .first()
+        )
+        if item is None:
             raise RuntimeError("no ACTIVE Knowledge exists for event-flow test")
-        item = knowledge[0]
         event = KnowledgeValidated(
-            knowledge_id=item.knowledge_id,
-            fingerprint_hash=item.fingerprint.fingerprint_hash,
+            knowledge_id=str(item.knowledge_id),
+            fingerprint_hash=str(item.fingerprint_hash),
         )
         logger.warning("[EVENT-TRACE] Phase 8 published KnowledgeValidated")
         p8.publisher.publish(event)
