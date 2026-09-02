@@ -9,17 +9,25 @@ from typing import Any, Callable, Iterable, List
 
 logger = logging.getLogger("bridges.observation_to_learning")
 _sheets_client = None
+_daily_log_by_media_id = None
 
 
 def _fetch_daily_log_row(media_id: str) -> dict:
-    global _sheets_client
+    global _sheets_client, _daily_log_by_media_id
     from phase5_6.lib import config
     from phase5_6.lib.sheets_client import SheetsClient
     if _sheets_client is None:
         _sheets_client = SheetsClient(config.load_sheets_service_account_json(), config.require_env("GOOGLE_SHEET_ID"))
-    for row in _sheets_client._ws(config.DAILY_LOG_TAB).get_all_records():  # noqa: SLF001
-        if str(row.get("media_id") or "") == str(media_id):
-            return row
+    if _daily_log_by_media_id is None:
+        rows = _sheets_client._ws(config.DAILY_LOG_TAB).get_all_records()  # noqa: SLF001
+        _daily_log_by_media_id = {
+            str(row.get("media_id")): row
+            for row in rows
+            if row.get("media_id")
+        }
+    row = _daily_log_by_media_id.get(str(media_id))
+    if row is not None:
+        return row
     raise LookupError(f"no Daily_Log row found for media_id={media_id}")
 
 
