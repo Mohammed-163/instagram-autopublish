@@ -243,13 +243,24 @@ def _run_event_flow_test(components):
 
 
 if __name__ == "__main__":
+    import argparse
+
+    parser = argparse.ArgumentParser(description="Run the unified AI pipeline")
+    parser.add_argument(
+        "--test-event-flow",
+        action="store_true",
+        help="run the synthetic Phase 8→9→10 event-flow test",
+    )
+    args = parser.parse_args()
+    test_event_flow = args.test_event_flow or os.environ.get("TEST_EVENT_FLOW", "").lower() == "true"
+
     print("Starting unified AI pipeline bootstrap...", flush=True)
     try:
         components = bootstrap()
         print("\nBootstrap complete. Active components:")
         for name in components:
             print(f"  ✓ {name}")
-        if os.environ.get("TEST_EVENT_FLOW", "").lower() == "true":
+        if test_event_flow:
             _run_event_flow_test(components)
     except BaseException:
         import traceback
