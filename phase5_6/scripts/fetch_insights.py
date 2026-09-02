@@ -140,8 +140,35 @@ def main():
             phase7_bootstrap.shutdown()
         return
 
+    # Iterate over live account media, while retaining the matching sheet row.
+    live_media = ig._request(
+        "GET", f"{ig.ig_business_id}/media",
+        params={"fields": "id,caption,timestamp,media_type,media_product_type", "limit": 100},
+    ).get("data", [])
+    live_work = []
+    for item in live_media:
+        item_id = str(item.get("id") or "")
+        caption = str(item.get("caption") or "").lower()
+        matches = [
+            (row_index, row) for row_index, row in due_posts
+            if item_id == str(row.get("media_id") or "")
+            or (
+                row.get("topic_slug")
+                and str(row.get("topic_slug")).lower() in caption
+            )
+        ]
+        if matches:
+            row_index, row = matches[0]
+            live_work.append((row_index, {**row, "media_id": item_id}))
+
+    if not live_work:
+        print("No due posts matched live Instagram media.")
+        if phase7_bootstrap is not None:
+            phase7_bootstrap.shutdown()
+        return
+
     fetched = 0
-    for row_index, row in due_posts:
+    for row_index, row in live_work:
         media_product_type = "UNKNOWN"
         try:
             resolved_media_id = resolve_published_media_id(ig, row)
@@ -231,7 +258,7 @@ def main():
     if phase7_bootstrap is not None:
         phase7_bootstrap.shutdown()
 
-    print(f"Fetched insights for {fetched}/{len(due_posts)} post(s).")
+    print(f"Fetched insights for {fetched}/{len(live_work)} post(s).")
 
 
 if __name__ == "__main__":
