@@ -8,12 +8,25 @@ from numbers import Number
 from typing import Any, Callable, Iterable, List
 
 logger = logging.getLogger("bridges.observation_to_learning")
+_sheets_client = None
 
 
-def _fallback_event(phase7_event: object, event_type: Any) -> object:
+def _fetch_daily_log_row(media_id: str) -> dict:
+    global _sheets_client
+    from phase5_6.lib import config
+    from phase5_6.lib.sheets_client import SheetsClient
+    if _sheets_client is None:
+        _sheets_client = SheetsClient(config.load_sheets_service_account_json(), config.require_env("GOOGLE_SHEET_ID"))
+    for row in _sheets_client._ws(config.DAILY_LOG_TAB).get_all_records():  # noqa: SLF001
+        if str(row.get("media_id") or "") == str(media_id):
+            return row
+    raise LookupError(f"no Daily_Log row found for media_id={media_id}")
+
+
+def _fallback_event(phase7_event: object, event_type: Any, subject_id: str) -> object:
     return event_type(
         observation_id=str(getattr(phase7_event, "observation_id", "")),
-        subject_id=str(getattr(phase7_event, "tenant_id", "system")),
+        subject_id=subject_id,
         metric_name="observation_recorded",
         metric_value=1.0,
         context={
@@ -37,6 +50,19 @@ def _translate(phase7_event: object) -> List[object]:
 
     if not isinstance(result, dict):
         result = {}
+
+    media_id = str(result.get("media_id") or getattr(phase7_event, "media_id", "") or "")
+    plan_row = {}
+    try:
+        if not media_id:
+            raise LookupError("event does not contain media_id")
+        plan_row = _fetch_daily_log_row(media_id)
+    except Exception as exc:
+        logger.warning("Could not read Daily_Log for media_id=%s: %s", media_id or "unknown", exc)
+
+    topic_slug = str(plan_row.get("topic_slug") or "").strip()
+    hook_type = str(plan_row.get("hook_type") or "").strip()
+    subject_id = (topic_slug or hook_type or f"media_{media_id or observation_id}").strip()[:255]
 
     metric_names = (
         "reach",
@@ -71,7 +97,7 @@ def _translate(phase7_event: object) -> List[object]:
         translated.append(
             P8ObservationRecorded(
                 observation_id=observation_id,
-                subject_id=tenant_id,
+                subject_id=subject_id,
                 metric_name=metric_name,
                 metric_value=float(value),
                 context=dict(context),
@@ -83,6 +109,7 @@ def _translate(phase7_event: object) -> List[object]:
             _fallback_event(
                 phase7_event,
                 P8ObservationRecorded,
+                subject_id,
             )
         )
 
@@ -117,4 +144,3 @@ def wire(
     logger.info(
         "observation_to_learning bridge wired: "
         "Phase7.ObservationRecorded → Phase8"
-    )
