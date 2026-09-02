@@ -34,6 +34,7 @@ class LearningObservationModel(Base):
     __tablename__ = "learning_observations"
     id = Column(Integer, primary_key=True, autoincrement=True)
     observation_id = Column(String(255), nullable=True, index=True)
+    media_id = Column(String(255), nullable=True, index=True)
     subject_id = Column(String(255), nullable=False, index=True)
     metric_name = Column(String(100), nullable=False, index=True)
     metric_value = Column(Float, nullable=False)
