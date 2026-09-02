@@ -119,17 +119,6 @@ def _translate(phase7_event: object) -> List[object]:
             from phase8_learning.database.connection import DatabaseConnectionFactory
             from phase8_learning.repository.learning_observation_repository import save_metrics
             settings = Settings.from_env()
-            db_url = settings.database_url
-            masked = db_url.split("@")[-1] if "@" in db_url else db_url[:15] + "..."
-            logger.warning("[DEBUG] learning_observations will write to host: %s", masked)
-            for var in [
-                "LEARNING_LAYER_DATABASE_URL",
-                "KCL_DATABASE_URL",
-                "P10_DATABASE_URL",
-                "DATABASE_URL",
-            ]:
-                logger.warning("[DEBUG] %s is set: %s", var, bool(os.environ.get(var)))
-            logger.warning("[DEBUG] translated metrics count: %d", len(translated))
             factory = DatabaseConnectionFactory(settings)
             session = factory.new_session()
             try:
@@ -169,7 +158,46 @@ def wire(
             return
 
         try:
-            phase8_run(_translate(event))
+            current = _translate(event)
+            from phase8_learning.config.settings import Settings
+            from phase8_learning.database.connection import DatabaseConnectionFactory
+            from phase8_learning.database.models import LearningObservationModel
+            from phase8_learning.events.events import ObservationRecorded as P8ObservationRecorded
+
+            pairs = {(item.subject_id, item.metric_name) for item in current}
+            factory = DatabaseConnectionFactory(Settings.from_env())
+            session = factory.new_session()
+            try:
+                all_metrics_for_engine = []
+                seen_keys = set()
+                for subject_id, metric_name in pairs:
+                    rows = (session.query(LearningObservationModel)
+                            .filter_by(subject_id=subject_id, metric_name=metric_name)
+                            .order_by(LearningObservationModel.created_at.desc())
+                            .limit(100).all())
+                    for row in rows:
+                        key = (str(row.observation_id or row.id), row.metric_name)
+                        if key not in seen_keys:
+                            all_metrics_for_engine.append(P8ObservationRecorded(
+                                observation_id=key[0], subject_id=row.subject_id,
+                                metric_name=row.metric_name, metric_value=float(row.metric_value),
+                                context=row.context or {},
+                            ))
+                            seen_keys.add(key)
+                for item in current:
+                    key = (str(item.observation_id), item.metric_name)
+                    if key not in seen_keys:
+                        all_metrics_for_engine.append(item)
+                        seen_keys.add(key)
+            finally:
+                session.close()
+                factory.engine.dispose()
+
+            logger.warning(
+                "[DEBUG-TRACE] process() called with %d observations "
+                "(was in-memory only before)", len(all_metrics_for_engine)
+            )
+            phase8_run(all_metrics_for_engine)
         except Exception:
             logger.exception(
                 "observation_to_learning bridge failed for %r",
