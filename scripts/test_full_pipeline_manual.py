@@ -98,6 +98,10 @@ def main() -> int:
     ])
     print("[EVENT-TRACE] Phase 8 published KnowledgeValidated")
     print(f"    Mock Phase 8 knowledge result count: {len(mock_results)}")
+    mock_candidate_created = len(mock_results) > 0
+    # The mock observations intentionally contain the same metric twice. Do
+    # not let those deliberate inputs affect the real Phase 6→7→8 assertion.
+    captured_events.clear()
 
     print("[3/5] Creating synthetic Phase 6 ExecutionCompleted event...")
     from core.events import ExecutionCompleted
@@ -143,6 +147,8 @@ def main() -> int:
         and len(real_metrics) == 5
         and sorted(real_metrics) == sorted(EXPECTED_METRICS)
         and not fallback_detected
+        and mock_candidate_created
+        and len(p8_results) > 0
     )
 
     print("[5/5] Final result...")
