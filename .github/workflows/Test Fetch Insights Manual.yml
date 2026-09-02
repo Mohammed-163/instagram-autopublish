@@ -1,0 +1,17 @@
+name: Test Fetch Insights Manual
+on:
+  workflow_dispatch:
+
+jobs:
+  fetch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install -r requirements.txt
+      - run: python phase5_6/scripts/fetch_insights.py
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          META_ACCESS_TOKEN: ${{ secrets.META_ACCESS_TOKEN }}
