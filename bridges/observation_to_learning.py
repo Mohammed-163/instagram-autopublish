@@ -4,6 +4,7 @@ Bridge: Phase7 (Observation) → Phase8 (Learning).
 from __future__ import annotations
 
 import logging
+import os
 from numbers import Number
 from typing import Any, Callable, Iterable, List
 
@@ -117,7 +118,19 @@ def _translate(phase7_event: object) -> List[object]:
             from phase8_learning.config.settings import Settings
             from phase8_learning.database.connection import DatabaseConnectionFactory
             from phase8_learning.repository.learning_observation_repository import save_metrics
-            factory = DatabaseConnectionFactory(Settings.from_env())
+            settings = Settings.from_env()
+            db_url = settings.database_url
+            masked = db_url.split("@")[-1] if "@" in db_url else db_url[:15] + "..."
+            logger.info("[DEBUG] learning_observations will write to host: %s", masked)
+            for var in [
+                "LEARNING_LAYER_DATABASE_URL",
+                "KCL_DATABASE_URL",
+                "P10_DATABASE_URL",
+                "DATABASE_URL",
+            ]:
+                logger.info("[DEBUG] %s is set: %s", var, bool(os.environ.get(var)))
+            logger.info("[DEBUG] translated metrics count: %d", len(translated))
+            factory = DatabaseConnectionFactory(settings)
             session = factory.new_session()
             try:
                 save_metrics(
