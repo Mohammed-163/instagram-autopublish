@@ -19,12 +19,15 @@ layer.
 
 from __future__ import annotations
 
+import logging
 from typing import Iterable, List, Optional
 
 from phase8_learning.config.settings import Settings
 from phase8_learning.domain.knowledge import Knowledge
 from phase8_learning.events.events import ObservationRecorded
 from phase8_learning.infrastructure.container import Container
+
+logger = logging.getLogger(__name__)
 
 
 def run(
@@ -57,7 +60,13 @@ def run(
             for row in historical
             if str(row.observation_id or row.id) not in seen
         ]
-        candidates = stack.engine.process(restored + incoming)
+        all_observations = restored + incoming
+        logger.warning(
+            "[DEBUG] Calling LearningEngine.process with %d total observations "
+            "(historical=%d, current=%d)",
+            len(all_observations), len(historical), len(incoming),
+        )
+        candidates = stack.engine.process(all_observations)
         results = stack.service.process_candidates(list(candidates))
         stack.unit_of_work.commit()
         return results
