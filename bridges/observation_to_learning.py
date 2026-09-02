@@ -193,10 +193,6 @@ def wire(
                 session.close()
                 factory.engine.dispose()
 
-            logger.warning(
-                "[DEBUG-TRACE] process() called with %d observations "
-                "(was in-memory only before)", len(all_metrics_for_engine)
-            )
             phase8_run(all_metrics_for_engine)
         except Exception:
             logger.exception(
