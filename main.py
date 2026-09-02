@@ -182,8 +182,9 @@ def bootstrap():
 
 def _run_event_flow_test(components):
     """Publish one real KnowledgeValidated event through Phase 9 and 10."""
-    from phase8_learning.events.events import KnowledgeValidated
+    from phase8_learning.events.events import ObservationRecorded, KnowledgeValidated
     from phase9_coverage.events.events import KnowledgeCoverageCalculated
+    from phase8_learning.main import run as phase8_run
 
     p8 = components["phase8_container"]
     p9 = components["phase9_container"]
@@ -205,6 +206,22 @@ def _run_event_flow_test(components):
 
     stack = p8.build_stack()
     try:
+        phase8_run([
+            ObservationRecorded(
+                observation_id="test-obs-1",
+                subject_id="test-topic",
+                metric_name="likes",
+                metric_value=100.0,
+                context={"media_id": "test-media"},
+            ),
+            ObservationRecorded(
+                observation_id="test-obs-2",
+                subject_id="test-topic",
+                metric_name="likes",
+                metric_value=105.0,
+                context={"media_id": "test-media"},
+            ),
+        ])
         from phase8_learning.database.models import KnowledgeModel
 
         item = (
