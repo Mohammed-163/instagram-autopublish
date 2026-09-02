@@ -138,8 +138,7 @@ class LearningEngine:
         values = [o.metric_value for o in sorted_group]
         mean_value = sum(values) / len(values)
         variance = sum((v - mean_value) ** 2 for v in values) / len(values)
-        spread = max(values) - min(values)
-        consistency = self._compute_consistency(spread, mean_value)
+        consistency = self._compute_consistency(values)
 
         if consistency < self._config.min_consistency_threshold:
             logger.warning(
@@ -181,11 +180,32 @@ class LearningEngine:
         )
 
     @staticmethod
-    def _compute_consistency(spread: float, mean_value: float) -> float:
+    def _trim_outliers(values: list[float], trim_ratio: float = 0.1) -> list[float]:
+        if len(values) < 5:
+            return values
+        sorted_values = sorted(values)
+        trim_count = max(1, int(len(sorted_values) * trim_ratio))
+        return sorted_values[trim_count: len(sorted_values) - trim_count]
+
+    @staticmethod
+    def _compute_consistency(values: list[float]) -> float:
+        if not values:
+            return 0.0
+
+        trimmed = LearningEngine._trim_outliers(values)
+        if len(trimmed) < 2:
+            return 1.0
+
+        mean_value = sum(trimmed) / len(trimmed)
         if mean_value == 0:
-            return 1.0 if spread == 0 else 0.0
-        normalized_spread = min(abs(spread / mean_value), 1.0)
-        return round(1.0 - normalized_spread, 6)
+            variance = sum(v ** 2 for v in trimmed) / len(trimmed)
+            return 1.0 if variance == 0 else 0.0
+
+        variance = sum((v - mean_value) ** 2 for v in trimmed) / len(trimmed)
+        std_dev = variance ** 0.5
+        coefficient_of_variation = std_dev / abs(mean_value)
+        normalized = min(coefficient_of_variation, 1.0)
+        return round(1.0 - normalized, 6)
 
     @staticmethod
     def _bucket(value: float) -> str:
