@@ -142,13 +142,20 @@ def _wire_bridges(p8_container, p9_container, p10_app):
         from bridges.learning_to_coverage import wire as wire_learn_cov
         from application.main import run as p9_run
 
+        def _knowledge_lookup(knowledge_id):
+            stack = p8_container.build_stack()
+            try:
+                return stack.repository.get(str(knowledge_id))
+            finally:
+                stack.unit_of_work.__exit__(None, None, None)
+
         def _p9_adapter(event):
             coverage_event = p9_run(event)
             p9_container.publisher.publish(coverage_event)
             return coverage_event
 
         logger.info("Phase8→Phase9 publisher: %s", type(p8_container.publisher).__name__)
-        wire_learn_cov(p8_container.publisher, _p9_adapter)
+        wire_learn_cov(p8_container.publisher, _p9_adapter, _knowledge_lookup)
         logger.info("Bridge Phase8→Phase9 wired.")
     except Exception:
         logger.warning("Phase8→Phase9 bridge not wired.", exc_info=True)
@@ -156,8 +163,10 @@ def _wire_bridges(p8_container, p9_container, p10_app):
     # Phase9 → Phase10
     try:
         from bridges.coverage_to_intelligence import wire as wire_cov_intel
+        from phase10_writer import wire as wire_phase10_writer
         logger.info("Phase9→Phase10 publishers: %s → %s", type(p9_container.publisher).__name__, type(p10_app.publisher).__name__)
         wire_cov_intel(p9_container.publisher, p10_app.publisher)
+        wire_phase10_writer(p10_app.publisher)
         logger.info("Bridge Phase9→Phase10 wired.")
     except Exception:
         logger.warning("Phase9→Phase10 bridge not wired.", exc_info=True)
