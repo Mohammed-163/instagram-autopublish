@@ -131,16 +131,9 @@ def main():
     gemini = GeminiClient(gemini_keys) if any(gemini_keys) else None
     date_str = datetime.utcnow().strftime("%Y-%m-%d")
 
-    cutoff_iso = (datetime.utcnow() - timedelta(days=config.INSIGHTS_FETCH_DELAY_DAYS)).isoformat()
-    due_posts = sheets.get_posts_due_for_insights(cutoff_iso)
-
-    if not due_posts:
-        print("No posts due for insights collection right now.")
-        if phase7_bootstrap is not None:
-            phase7_bootstrap.shutdown()
-        return
-
-    # Iterate over live account media, while retaining the matching sheet row.
+    # Direct account pull: do not filter by stale/old Daily_Log media IDs.
+    # Sheets remains an optional metadata/update store only.
+    daily_rows = sheets._ws(config.DAILY_LOG_TAB).get_all_records()  # noqa: SLF001
     live_media = ig._request(
         "GET", f"{ig.ig_business_id}/media",
         params={"fields": "id,caption,timestamp,media_type,media_product_type", "limit": 100},
@@ -150,28 +143,26 @@ def main():
         item_id = str(item.get("id") or "")
         caption = str(item.get("caption") or "").lower()
         matches = [
-            (row_index, row) for row_index, row in due_posts
+            (row_index, row) for row_index, row in enumerate(daily_rows, start=2)
             if item_id == str(row.get("media_id") or "")
             or (
                 row.get("topic_slug")
                 and str(row.get("topic_slug")).lower() in caption
             )
         ]
-        if matches:
-            row_index, row = matches[0]
-            live_work.append((row_index, {**row, "media_id": item_id}))
-
-    if not live_work:
-        print("No due posts matched live Instagram media.")
-        if phase7_bootstrap is not None:
-            phase7_bootstrap.shutdown()
-        return
+        row_index, row = matches[0] if matches else (None, {})
+        live_work.append((row_index, {
+            **row,
+            "media_id": item_id,
+            "caption": item.get("caption", ""),
+            "topic_slug": row.get("topic_slug") or item.get("caption", ""),
+        }))
 
     fetched = 0
     for row_index, row in live_work:
         media_product_type = "UNKNOWN"
         try:
-            resolved_media_id = resolve_published_media_id(ig, row)
+            resolved_media_id = row["media_id"]
             metrics, media_product_type = fetch_media_insights(ig, resolved_media_id)
             if metrics is None:
                 print(
@@ -221,11 +212,12 @@ def main():
                         "⚠️ Phase 7/8 processing failed; Sheets write succeeded "
                         f"for {row.get('topic_slug')}: {e}"
                     )
-            sheets.update_row_fields(
-                config.DAILY_LOG_TAB, row_index,
-                {"insights_fetched": "yes"},
-                verify_field="topic_slug", verify_value=row.get("topic_slug"),
-            )
+            if row_index is not None:
+                sheets.update_row_fields(
+                    config.DAILY_LOG_TAB, row_index,
+                    {"insights_fetched": "yes"},
+                    verify_field="topic_slug", verify_value=row.get("topic_slug"),
+                )
             fetched += 1
             print(f"✓ Pulled insights for {row.get('topic_slug')} (media_id={resolved_media_id})")
 
