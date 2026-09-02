@@ -22,10 +22,23 @@ from sqlalchemy import (
     JSON,
     String,
     UniqueConstraint,
+    DateTime,
+    func,
 )
 from sqlalchemy.orm import declarative_base, relationship
 
 Base = declarative_base()
+
+
+class LearningObservationModel(Base):
+    __tablename__ = "learning_observations"
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    observation_id = Column(String(255), nullable=True, index=True)
+    subject_id = Column(String(255), nullable=False, index=True)
+    metric_name = Column(String(100), nullable=False, index=True)
+    metric_value = Column(Float, nullable=False)
+    context = Column(JSON, nullable=True, default=dict)
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), index=True)
 
 
 class KnowledgeModel(Base):
