@@ -21,6 +21,7 @@ Constraints:
 
 from __future__ import annotations
 
+import logging
 from collections import defaultdict
 from dataclasses import dataclass
 from typing import Callable, DefaultDict, Iterable, List, Mapping, Optional, Tuple
@@ -31,6 +32,8 @@ from phase8_learning.domain.explainability import KnowledgeExplainability
 from phase8_learning.domain.knowledge import KnowledgeCandidate
 from phase8_learning.domain.versioning import KnowledgeVersion
 from phase8_learning.events.events import ObservationRecorded
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -123,6 +126,10 @@ class LearningEngine:
         group: List[ObservationRecorded],
     ) -> Optional[KnowledgeCandidate]:
         if len(group) < self._config.min_sample_size:
+            logger.warning(
+                "[DEBUG] Group %s: size=%d, rejected: min_sample_size=%d",
+                group_key, len(group), self._config.min_sample_size,
+            )
             return None
 
         subject_id, metric_name = group_key
@@ -135,6 +142,12 @@ class LearningEngine:
         consistency = self._compute_consistency(spread, mean_value)
 
         if consistency < self._config.min_consistency_threshold:
+            logger.warning(
+                "[DEBUG] Group %s: size=%d, consistency=%s, threshold=%s, "
+                "rejected: min_consistency_threshold",
+                group_key, len(group), consistency,
+                self._config.min_consistency_threshold,
+            )
             return None
 
         pattern = self._detect_pattern(subject_id, metric_name, sorted_group, consistency)
