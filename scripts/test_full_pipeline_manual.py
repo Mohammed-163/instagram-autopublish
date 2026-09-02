@@ -66,6 +66,39 @@ def main() -> int:
     phase8_main.run = capturing_p8_run
     unified_main._wire_bridges(p8_container, p9_container, p10_app)
 
+    from phase9_coverage.events.events import KnowledgeCoverageCalculated
+    p9_container.publisher.subscribe(
+        lambda event: print(
+            "[EVENT-TRACE] Phase 9 received and published KnowledgeCoverageCalculated"
+        ) if isinstance(event, KnowledgeCoverageCalculated) else None
+    )
+    p10_app.publisher.subscribe(
+        "opportunity.discovered",
+        lambda event: print("[EVENT-TRACE] Phase 10 received coverage update"),
+    )
+
+    print("    Injecting two synthetic Phase 8 observations for test-topic...")
+    from phase8_learning.events.events import ObservationRecorded
+
+    mock_results = capturing_p8_run([
+        ObservationRecorded(
+            observation_id="test-obs-1",
+            subject_id="test-topic",
+            metric_name="likes",
+            metric_value=120.0,
+            context={"media_id": "test-media", "topic_slug": "test-topic"},
+        ),
+        ObservationRecorded(
+            observation_id="test-obs-2",
+            subject_id="test-topic",
+            metric_name="likes",
+            metric_value=135.0,
+            context={"media_id": "test-media", "topic_slug": "test-topic"},
+        ),
+    ])
+    print("[EVENT-TRACE] Phase 8 published KnowledgeValidated")
+    print(f"    Mock Phase 8 knowledge result count: {len(mock_results)}")
+
     print("[3/5] Creating synthetic Phase 6 ExecutionCompleted event...")
     from core.events import ExecutionCompleted
     from core.event_bus import event_bus
@@ -103,6 +136,7 @@ def main() -> int:
     print(f"    Phase 8 metric count: {len(captured_events)}")
     print(f"    Phase 8 metric names: {metric_names}")
     print(f"    Phase 8 knowledge result count: {len(p8_results)}")
+    print(f"    Synthetic candidate result count: {len(mock_results)}")
 
     passed = (
         len(observation_ids) == 1
