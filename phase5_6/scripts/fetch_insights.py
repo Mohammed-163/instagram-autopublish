@@ -37,6 +37,37 @@ REQUIRED_VARS = [
     "TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID",
 ]
 
+INSIGHTS_METRICS = "reach,saved,likes,comments,shares,views"
+SUPPORTED_MEDIA_PRODUCT_TYPES = {"FEED", "REELS", "CAROUSEL_ALBUM"}
+
+
+def fetch_media_insights(ig, media_id):
+    """Fetch media metadata, then query the Insights edge independently."""
+    metadata = ig._request(  # noqa: SLF001 - no public metadata/edge method exists
+        "GET", str(media_id), params={"fields": "media_product_type,media_type"}
+    )
+    media_product_type = str(metadata.get("media_product_type") or "UNKNOWN").upper()
+    media_type = str(metadata.get("media_type") or "").upper()
+
+    # Carousel children are IMAGE/VIDEO objects, not the CAROUSEL_ALBUM container.
+    if media_type in {"IMAGE", "VIDEO"} and media_product_type not in SUPPORTED_MEDIA_PRODUCT_TYPES:
+        return None, media_product_type
+
+    if media_product_type not in SUPPORTED_MEDIA_PRODUCT_TYPES and media_type != "CAROUSEL_ALBUM":
+        raise InstagramAPIError(
+            f"unsupported media type: media_product_type={media_product_type}, "
+            f"media_type={media_type or 'UNKNOWN'}"
+        )
+
+    data = ig._request(  # noqa: SLF001 - Insights is an edge, not a media field
+        "GET", f"{media_id}/insights", params={"metric": INSIGHTS_METRICS}
+    )
+    result = {}
+    for item in data.get("data", []):
+        values = item.get("values", [])
+        result[item["name"]] = values[0].get("value") if values else None
+    return result, media_product_type
+
 
 def main():
     config.check_required_env_vars(REQUIRED_VARS)
@@ -85,8 +116,15 @@ def main():
 
     fetched = 0
     for row_index, row in due_posts:
+        media_product_type = "UNKNOWN"
         try:
-            metrics = ig.get_media_insights(row["media_id"])
+            metrics, media_product_type = fetch_media_insights(ig, row["media_id"])
+            if metrics is None:
+                print(
+                    f"⚠️ Skipping carousel child {row.get('topic_slug')} "
+                    f"(media_id={row.get('media_id')}, type: {media_product_type})"
+                )
+                continue
             sheets.append_post_performance({
                 "date": row.get("date", ""),
                 "topic_slug": row.get("topic_slug", ""),
@@ -141,9 +179,15 @@ def main():
             # Media may have been deleted manually, or insights aren't ready
             # yet for some edge case — log and try again on the next run
             # rather than treating it as critical.
-            print(f"⚠️ Could not fetch insights for {row.get('topic_slug')}: {e}")
+            print(
+                f"⚠️ Could not fetch insights for {row.get('topic_slug')} "
+                f"(type: {media_product_type}): {e}"
+            )
         except (requests.exceptions.Timeout, requests.exceptions.ConnectionError) as e:
-            print(f"⚠️ Transient network error fetching insights for {row.get('topic_slug')}, will retry next run: {e}")
+            print(
+                f"⚠️ Transient network error fetching insights for {row.get('topic_slug')} "
+                f"(type: {media_product_type}), will retry next run: {e}"
+            )
         except Exception:
             if gemini:
                 handle_unexpected(
