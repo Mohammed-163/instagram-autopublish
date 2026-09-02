@@ -96,7 +96,14 @@ def main() -> int:
             context={"media_id": "test-media", "topic_slug": "test-topic"},
         ),
     ])
-    print("[EVENT-TRACE] Phase 8 published KnowledgeValidated")
+    if mock_results:
+        from phase8_learning.events.events import KnowledgeValidated
+        for knowledge in mock_results:
+            print("[EVENT-TRACE] Phase 8 published KnowledgeValidated")
+            p8_container.publisher.publish(KnowledgeValidated(
+                knowledge_id=knowledge.knowledge_id,
+                fingerprint_hash=knowledge.fingerprint.fingerprint_hash,
+            ))
     print(f"    Mock Phase 8 knowledge result count: {len(mock_results)}")
     mock_candidate_created = len(mock_results) > 0
     # The mock observations intentionally contain the same metric twice. Do
