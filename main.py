@@ -66,6 +66,10 @@ def run(
             "(historical=%d, current=%d)",
             len(all_observations), len(historical), len(incoming),
         )
+        logger.warning(
+            "[DEBUG-TRACE] process() called with %d observations for this run",
+            len(all_observations),
+        )
         candidates = stack.engine.process(all_observations)
         results = stack.service.process_candidates(list(candidates))
         stack.unit_of_work.commit()
