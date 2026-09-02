@@ -199,6 +199,7 @@ def main():
                             node_id=node_id,
                             tenant_id="system",
                             payload={"result": {
+                                "media_id": resolved_media_id,
                                 "reach": metrics.get("reach"),
                                 "saved": metrics.get("saved"),
                                 "likes": metrics.get("likes"),
