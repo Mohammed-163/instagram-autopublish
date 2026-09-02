@@ -104,6 +104,25 @@ def _translate(phase7_event: object) -> List[object]:
             )
         )
 
+    if translated:
+        try:
+            from phase8_learning.config.settings import Settings
+            from phase8_learning.database.connection import DatabaseConnectionFactory
+            from phase8_learning.repository.learning_observation_repository import save_metrics
+            factory = DatabaseConnectionFactory(Settings.from_env())
+            session = factory.new_session()
+            try:
+                save_metrics(
+                    session, observation_id, subject_id,
+                    [(item.metric_name, item.metric_value) for item in translated],
+                    dict(context),
+                )
+            finally:
+                session.close()
+                factory.engine.dispose()
+        except Exception:
+            logger.exception("Could not persist learning observations for observation_id=%s", observation_id)
+
     if not translated:
         translated.append(
             _fallback_event(
@@ -144,3 +163,4 @@ def wire(
     logger.info(
         "observation_to_learning bridge wired: "
         "Phase7.ObservationRecorded → Phase8"
+    )
