@@ -10,6 +10,11 @@ on:
         required: true
         default: false
         type: boolean
+      also_run_full_pipeline:
+        description: "Run Phase 8-10 pipeline even when manual test also runs"
+        type: boolean
+        default: false
+        required: false
 
 concurrency:
   group: learning
@@ -25,7 +30,7 @@ jobs:
         with: {python-version: "3.11", cache: pip}
       - run: pip install -r requirements.txt --quiet
       - name: Run full AI pipeline (Phases 8-10)
-        if: ${{ github.event_name != 'workflow_dispatch' || inputs.run_pipeline_test != true }}
+        if: ${{ success() && (github.event_name != 'workflow_dispatch' || inputs.run_pipeline_test != true || inputs.also_run_full_pipeline == true) }}
         env:
           DATABASE_URL:                ${{ secrets.DATABASE_URL }}
           SUPABASE_URL:                ${{ secrets.SUPABASE_URL }}
