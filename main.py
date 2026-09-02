@@ -143,7 +143,9 @@ def _wire_bridges(p8_container, p9_container, p10_app):
         from application.main import run as p9_run
 
         def _p9_adapter(event):
-            p9_run(event)
+            coverage_event = p9_run(event)
+            p9_container.publisher.publish(coverage_event)
+            return coverage_event
 
         logger.info("Phase8→Phase9 publisher: %s", type(p8_container.publisher).__name__)
         wire_learn_cov(p8_container.publisher, _p9_adapter)
