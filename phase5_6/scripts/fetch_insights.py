@@ -155,7 +155,7 @@ def main():
             **row,
             "media_id": item_id,
             "caption": item.get("caption", ""),
-            "topic_slug": row.get("topic_slug") or item.get("caption", ""),
+            "topic_slug": row.get("topic_slug") or item_id,
         }))
 
     fetched = 0
@@ -190,11 +190,13 @@ def main():
                 try:
                     from observation.domain.events import ExecutionCompleted
 
+                    node_id = str(row.get("topic_slug") or resolved_media_id or "unknown").strip()[:255]
+
                     phase7_bootstrap.handle_event(
                         ExecutionCompleted(
                             execution_id=str(uuid.uuid4()),
                             workflow_id="fetch_insights",
-                            node_id=row.get("topic_slug", "unknown"),
+                            node_id=node_id,
                             tenant_id="system",
                             payload={"result": {
                                 "reach": metrics.get("reach"),
