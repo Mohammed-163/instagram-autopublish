@@ -121,15 +121,15 @@ def _translate(phase7_event: object) -> List[object]:
             settings = Settings.from_env()
             db_url = settings.database_url
             masked = db_url.split("@")[-1] if "@" in db_url else db_url[:15] + "..."
-            logger.info("[DEBUG] learning_observations will write to host: %s", masked)
+            logger.warning("[DEBUG] learning_observations will write to host: %s", masked)
             for var in [
                 "LEARNING_LAYER_DATABASE_URL",
                 "KCL_DATABASE_URL",
                 "P10_DATABASE_URL",
                 "DATABASE_URL",
             ]:
-                logger.info("[DEBUG] %s is set: %s", var, bool(os.environ.get(var)))
-            logger.info("[DEBUG] translated metrics count: %d", len(translated))
+                logger.warning("[DEBUG] %s is set: %s", var, bool(os.environ.get(var)))
+            logger.warning("[DEBUG] translated metrics count: %d", len(translated))
             factory = DatabaseConnectionFactory(settings)
             session = factory.new_session()
             try:
