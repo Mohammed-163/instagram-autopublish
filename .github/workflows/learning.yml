@@ -35,7 +35,7 @@ jobs:
           P10_DATABASE_URL:            ${{ secrets.P10_DATABASE_URL }}
           TELEGRAM_BOT_TOKEN:          ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID:            ${{ secrets.TELEGRAM_CHAT_ID }}
-        run: python main.py
+        run: python -u main.py
       - name: Run manual full pipeline test (Phases 6-8)
         if: ${{ github.event_name == 'workflow_dispatch' && inputs.run_pipeline_test == true }}
         env:
