@@ -6,14 +6,23 @@ from sqlalchemy.orm import Session
 from phase8_learning.database.models import LearningObservationModel
 
 def save_metrics(session: Session, observation_id: str, subject_id: str, metrics: list[tuple[str, float]], context: dict, media_id: str | None = None) -> None:
+    context = dict(context or {})
+    resolved_media_id = str(
+        media_id or context.get("media_id") or context.get("fingerprint") or ""
+    ).strip()
+    if not resolved_media_id:
+        raise ValueError(
+            "learning observation requires media_id or fingerprint for deduplication"
+        )
+    context["media_id"] = resolved_media_id
     rows = [
         {
             "observation_id": observation_id,
-            "media_id": media_id,
+            "media_id": resolved_media_id,
             "subject_id": subject_id,
             "metric_name": name,
             "metric_value": float(value),
-            "context": dict(context),
+            "context": context,
         }
         for name, value in metrics
     ]
