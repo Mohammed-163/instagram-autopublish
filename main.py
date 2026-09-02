@@ -62,12 +62,8 @@ def run(
         ]
         all_observations = restored + incoming
         logger.warning(
-            "[DEBUG] Calling LearningEngine.process with %d total observations "
-            "(historical=%d, current=%d)",
-            len(all_observations), len(historical), len(incoming),
-        )
-        logger.warning(
-            "[DEBUG-TRACE] process() called with %d observations for this run",
+            "[DEBUG-TRACE] process() called with %d observations "
+            "(was in-memory only before)",
             len(all_observations),
         )
         candidates = stack.engine.process(all_observations)
