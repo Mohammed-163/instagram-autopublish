@@ -60,7 +60,13 @@ def _translate(phase7_event: object) -> List[object]:
     if not isinstance(result, dict):
         result = {}
 
-    media_id = str(result.get("media_id") or getattr(phase7_event, "media_id", "") or "")
+    media_id = str(result.get("media_id") or getattr(phase7_event, "media_id", "") or "").strip()
+    if not media_id:
+        media_id = fingerprint.strip()
+        logger.warning(
+            "Missing explicit media_id for observation_id=%s; using fingerprint fallback",
+            observation_id,
+        )
     plan_row = {}
     try:
         if not media_id:
@@ -125,7 +131,8 @@ def _translate(phase7_event: object) -> List[object]:
                 save_metrics(
                     session, observation_id, subject_id,
                     [(item.metric_name, item.metric_value) for item in translated],
-                    dict(context),
+                    {**context, "media_id": media_id} if media_id else dict(context),
+                    media_id=media_id or None,
                 )
             finally:
                 session.close()
