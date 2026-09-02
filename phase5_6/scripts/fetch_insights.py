@@ -69,6 +69,32 @@ def fetch_media_insights(ig, media_id):
     return result, media_product_type
 
 
+def resolve_published_media_id(ig, row):
+    """Resolve stale container IDs to the final published Instagram media ID."""
+    media = ig._request(
+        "GET", f"{ig.ig_business_id}/media",
+        params={"fields": "id,caption,timestamp,media_type,media_product_type,shortcode,permalink", "limit": 100},
+    ).get("data", [])
+    stored_id = str(row.get("media_id") or "")
+    for item in media:
+        if str(item.get("id")) == stored_id:
+            return item["id"]
+
+    topic = str(row.get("topic_slug") or "").lower()
+    hook = str(row.get("hook_line") or "").lower()
+    candidates = [
+        item for item in media
+        if (topic and topic in str(item.get("caption") or "").lower())
+        or (hook and hook in str(item.get("caption") or "").lower())
+    ]
+    if len(candidates) == 1:
+        return candidates[0]["id"]
+    raise InstagramAPIError(
+        f"stored media_id {stored_id!r} was not found and no unique published media matched "
+        f"topic_slug={topic!r}"
+    )
+
+
 def main():
     config.check_required_env_vars(REQUIRED_VARS)
 
@@ -118,11 +144,12 @@ def main():
     for row_index, row in due_posts:
         media_product_type = "UNKNOWN"
         try:
-            metrics, media_product_type = fetch_media_insights(ig, row["media_id"])
+            resolved_media_id = resolve_published_media_id(ig, row)
+            metrics, media_product_type = fetch_media_insights(ig, resolved_media_id)
             if metrics is None:
                 print(
                     f"⚠️ Skipping carousel child {row.get('topic_slug')} "
-                    f"(media_id={row.get('media_id')}, type: {media_product_type})"
+                    f"(media_id={resolved_media_id}, type: {media_product_type})"
                 )
                 continue
             sheets.append_post_performance({
@@ -173,7 +200,7 @@ def main():
                 verify_field="topic_slug", verify_value=row.get("topic_slug"),
             )
             fetched += 1
-            print(f"✓ Pulled insights for {row.get('topic_slug')} (media_id={row.get('media_id')})")
+            print(f"✓ Pulled insights for {row.get('topic_slug')} (media_id={resolved_media_id})")
 
         except InstagramAPIError as e:
             # Media may have been deleted manually, or insights aren't ready
