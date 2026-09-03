@@ -4,6 +4,8 @@ and due, publishes them directly via the Instagram Graph API, updates status.
 """
 import os
 import sys
+import logging
+from dataclasses import dataclass
 from datetime import datetime
 
 import requests
@@ -17,6 +19,18 @@ from lib.instagram_client import InstagramClient, InstagramAPIError
 from lib.drive_client import DriveClient
 from lib.sheets_client import SheetsClient
 from lib.telegram_notifier import TelegramNotifier
+
+logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class PostPublished:
+    media_id: str
+    topic_slug: str
+    hook_line: str
+    published_at: str
+    media_type: str
+
 
 REQUIRED_VARS = [
     "GOOGLE_SHEET_ID", "GOOGLE_DRIVE_FOLDER_ID",
@@ -93,13 +107,14 @@ def main():
             full_caption = f"{caption}\n\n{hashtags}".strip()
 
             media_id = ig.publish_reel(public_url, full_caption)
+            published_at = datetime.utcnow().isoformat()
 
             try:
                 sheets.update_row_fields(
                     config.DAILY_LOG_TAB, row_index,
                     {
                         "status": config.STATUS_PUBLISHED,
-                        "published_at": datetime.utcnow().isoformat(),
+                        "published_at": published_at,
                         "media_id": media_id,
                     },
                     verify_field="topic_slug", verify_value=row.get("topic_slug"),
@@ -116,6 +131,28 @@ def main():
                     f"حدّث يدوياً: status=published, published_at, media_id={media_id} للصف رقم {row_index}. الخطأ: {e}",
                 )
                 continue
+
+            try:
+                post_published = PostPublished(
+                    media_id=str(media_id),
+                    topic_slug=str(row.get("topic_slug") or ""),
+                    hook_line=str(row.get("hook_line") or ""),
+                    published_at=published_at,
+                    media_type="REELS",
+                )
+                logger.info(
+                    "post_published media_id=%s topic_slug=%s hook_line=%s "
+                    "published_at=%s media_type=%s",
+                    post_published.media_id,
+                    post_published.topic_slug,
+                    post_published.hook_line,
+                    post_published.published_at,
+                    post_published.media_type,
+                )
+            except Exception:
+                logger.exception(
+                    "Failed to log post_published event (non-critical)"
+                )
 
             print(f"✓ Published post {row.get('topic_slug')} -> media_id={media_id}")
 
