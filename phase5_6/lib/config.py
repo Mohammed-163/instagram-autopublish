@@ -135,6 +135,9 @@ SYSTEM_STATUS_PAUSED = "paused"
 VIDEO_WIDTH = 1080
 VIDEO_HEIGHT = 1920
 VIDEO_DURATION_SECONDS = 6
+PIXABAY_VIDEO_MODE = False
+VIDEO_REVIEW_MAX_HEIGHT = 480
+MIN_VIDEO_HEIGHT_FOR_PUBLISH = 1080
 
 FONT_PATH = os.path.join(os.path.dirname(__file__), "..", "assets", "fonts", "Tajawal-ExtraBold.ttf")
 
