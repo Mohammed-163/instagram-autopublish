@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Optional
 
-from sqlalchemy import DateTime, Text, func
+from sqlalchemy import JSON, DateTime, Text, func
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -19,5 +19,7 @@ class EventLog(UUIDPrimaryKeyMixin, Base):
 
     event_type: Mapped[str] = mapped_column(Text, nullable=False)
     source: Mapped[str] = mapped_column(Text, nullable=False)
-    payload: Mapped[Optional[dict]] = mapped_column(JSONB)
+    payload: Mapped[Optional[dict]] = mapped_column(
+        JSON().with_variant(JSONB(), "postgresql")
+    )
     occurred_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
