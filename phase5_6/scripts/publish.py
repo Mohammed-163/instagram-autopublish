@@ -20,6 +20,7 @@ from lib.drive_client import DriveClient
 from lib.sheets_client import SheetsClient
 from lib.telegram_notifier import TelegramNotifier
 
+logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
