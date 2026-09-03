@@ -2,6 +2,8 @@
 Pixabay API wrapper — downloads a background image matching given keywords.
 """
 import random
+import os
+import subprocess
 
 import requests
 
@@ -51,6 +53,72 @@ class PixabayClient:
                 print(f"⚠️ Failed downloading candidate image {idx} for '{keywords}': {e}")
                 continue
         return paths
+
+    def download_video_candidates(
+        self,
+        keywords: str,
+        output_dir: str,
+        n: int = 5,
+        filename_prefix: str = "bg_video_candidate",
+    ) -> list:
+        """Download up to n original, vertical Pixabay videos at >=1080p."""
+        resp = requests.get(
+            "https://pixabay.com/api/videos/",
+            params={
+                "key": self.api_key,
+                "q": keywords,
+                "video_type": "film",
+                "safesearch": "true",
+                "per_page": 20,
+            },
+            timeout=20,
+        )
+        resp.raise_for_status()
+        hits = resp.json().get("hits", [])
+        random.shuffle(hits)
+        selected_urls = []
+        for hit in hits:
+            sizes = hit.get("videos") or {}
+            matching = [
+                data for data in sizes.values()
+                if data.get("url")
+                and int(data.get("height") or 0) >= config.MIN_VIDEO_HEIGHT_FOR_PUBLISH
+                and int(data.get("width") or 0) < int(data.get("height") or 0)
+            ]
+            if not matching:
+                continue
+            best = max(matching, key=lambda data: int(data.get("height") or 0))
+            selected_urls.append(best["url"])
+            if len(selected_urls) >= n:
+                break
+
+        paths = []
+        for idx, url in enumerate(selected_urls):
+            path = os.path.join(output_dir, f"{filename_prefix}_{idx}.mp4")
+            try:
+                video = requests.get(url, timeout=60)
+                video.raise_for_status()
+                with open(path, "wb") as fh:
+                    fh.write(video.content)
+                paths.append(path)
+            except requests.RequestException as exc:
+                print(f"⚠️ Failed downloading video candidate {idx} for '{keywords}': {exc}")
+        return paths
+
+    def create_review_copy(self, video_path: str, output_path: str) -> str:
+        """Create a 480p review copy while leaving the original untouched."""
+        cmd = [
+            "ffmpeg", "-y", "-i", video_path,
+            "-vf", f"scale=-2:{config.VIDEO_REVIEW_MAX_HEIGHT}",
+            "-c:v", "libx264", "-c:a", "copy",
+            output_path,
+        ]
+        result = subprocess.run(cmd, capture_output=True, text=True)
+        if result.returncode != 0:
+            raise RuntimeError(f"ffmpeg review-copy failed: {result.stderr}")
+        if not os.path.exists(output_path):
+            raise RuntimeError(f"ffmpeg reported success but did not create {output_path}")
+        return output_path
 
     def _find_image_urls(self, query: str, n: int = 5) -> list:
         resp = requests.get(
