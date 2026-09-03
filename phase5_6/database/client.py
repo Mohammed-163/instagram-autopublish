@@ -70,7 +70,20 @@ def _build_database_url() -> str:
     if explicit_url:
         return explicit_url
 
-    supabase_url = require_env("SUPABASE_URL")
+    allow_sqlite = optional_env("ALLOW_SQLITE_FALLBACK", "").lower() in {"1", "true", "yes", "on"}
+    running_in_ci = optional_env("CI", "").lower() == "true"
+    supabase_url = optional_env("SUPABASE_URL")
+    if not supabase_url and (allow_sqlite or running_in_ci):
+        fallback_url = "sqlite:///./phase5_6_ci.db"
+        logger.warning(
+            "SUPABASE_URL is missing; using SQLite fallback because "
+            "ALLOW_SQLITE_FALLBACK/CI permits it: %s",
+            fallback_url,
+        )
+        return fallback_url
+
+    if not supabase_url:
+        supabase_url = require_env("SUPABASE_URL")
     secret_key = require_env("SUPABASE_SECRET_KEY")
     password = optional_env("SUPABASE_DB_PASSWORD") or secret_key
 
