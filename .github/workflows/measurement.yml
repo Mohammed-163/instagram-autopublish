@@ -9,6 +9,17 @@ on:
         description: "Dry run (skip IG publish)"
         required: false
         default: "false"
+        type: boolean
+      test_pixabay_video:
+        description: "Run only the Pixabay Video API test"
+        required: false
+        default: false
+        type: boolean
+      pixabay_video_keywords:
+        description: "Keywords for the Pixabay video test"
+        required: false
+        default: "mountains nature"
+        type: string
 
 concurrency:
   group: measurement
@@ -32,6 +43,7 @@ jobs:
           sudo apt-get install -y --fix-missing ffmpeg
 
       - name: Run daily_generate.py
+        if: ${{ inputs.test_pixabay_video != true }}
         env:
           GOOGLE_SHEET_ID:                   ${{ secrets.GOOGLE_SHEET_ID }}
           GOOGLE_DRIVE_FOLDER_ID:            ${{ secrets.GOOGLE_DRIVE_FOLDER_ID }}
@@ -46,6 +58,12 @@ jobs:
           TELEGRAM_CHAT_ID:                  ${{ secrets.TELEGRAM_CHAT_ID }}
           DRY_RUN:                           ${{ github.event.inputs.dry_run || 'false' }}
         run: python phase5_6/scripts/daily_generate.py
+
+      - name: Test Pixabay Video API
+        if: ${{ inputs.test_pixabay_video == true }}
+        env:
+          PIXABAY_API_KEY: ${{ secrets.PIXABAY_API_KEY }}
+        run: python phase5_6/scripts/test_pixabay_video.py "${{ inputs.pixabay_video_keywords }}"
 
       - name: Notify failure
         if: failure()
