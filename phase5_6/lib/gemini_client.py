@@ -152,6 +152,22 @@ class GeminiClient:
         raw = self._call_with_fallback(prompt)
         return self._extract_json(raw)
 
+    def build_weekly_plan(self, weekly_summary: dict) -> dict:
+        prompt = f"""أنت مستشار استراتيجي لمنصة انستغرام متخصصة بالمحتوى النفسي.
+خلاصة أداء الأسبوع الماضي:
+{weekly_summary}
+
+أنشئ خطة محتوى للأسبوع القادم. إذا كانت الخلاصة فارغة فأنشئ خطة ابتدائية معقولة.
+أخرج JSON فقط:
+{{
+  "strategy_summary": "...",
+  "recommended_topics": ["topic1", "topic2"],
+  "post_frequency": "daily",
+  "focus_areas": ["area1", "area2"],
+  "avoid_topics": ["topic_to_avoid"]
+}}"""
+        return self._extract_json(self._call_with_fallback(prompt))
+
     def diagnose_workflow_error(self, error_log: str) -> str:
         prompt = f"""أنت مهندس DevOps خبير. حلل هذا الخطأ واقترح الإصلاح:
 
