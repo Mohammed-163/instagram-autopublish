@@ -190,11 +190,12 @@ class MigrationManager:
     def apply_migration(self, migration: Migration) -> None:
         def _apply() -> None:
             with self.engine.begin() as conn:
-                logger.info(
-                    "Migration SQL diagnostics: length=%d, first50=%r, last50=%r",
-                    len(migration.sql),
-                    migration.sql[:50],
-                    migration.sql[-50:],
+                print(
+                    f"[MIGRATION DIAGNOSTICS] version={migration.version} "
+                    f"length={len(migration.sql)} "
+                    f"first80={migration.sql[:80]!r} "
+                    f"last80={migration.sql[-80:]!r}",
+                    flush=True,
                 )
                 conn.execute(text(migration.sql))
                 conn.execute(
