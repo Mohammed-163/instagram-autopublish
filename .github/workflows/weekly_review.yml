@@ -3,6 +3,11 @@ on:
   schedule:
     - cron: "0 2 * * 0"
   workflow_dispatch:
+
+concurrency:
+  group: weekly-review-migrate
+  cancel-in-progress: false
+
 jobs:
   review:
     runs-on: ubuntu-latest
