@@ -1,390 +1,235 @@
--- =============================================================================
--- 0002_intelligence_layer_foundation.sql
--- =============================================================================
--- Adds the structural foundation required by the future Learning &
--- Intelligence Layer (Phase 2): features, scores, knowledge, experiments,
--- memory, planning, decisions, confidence, quality gate, engine health,
--- notifications, an event backbone, and versioned config/prompts/models.
---
--- No Phase 2 engine code runs yet. These tables exist purely so Phase 2 can
--- be built without a schema redesign. Nothing writes to them yet except
--- where a Phase 1 script is explicitly wired to (see repositories).
---
--- "Categories" from the project charter are intentionally NOT a new table
--- here: the existing `topics` table already is the category dimension
--- (name/slug/weight/rollup stats) since version 1. Adding a duplicate
--- `categories` table would just be two sources of truth for the same
--- concept.
--- =============================================================================
+"""
+Migration manager.
 
--- Ensure the trigger helper exists even when an existing database was marked
--- as having the baseline applied without successfully installing functions.sql.
-CREATE OR REPLACE FUNCTION set_updated_at()
-RETURNS TRIGGER AS $$
-BEGIN
-    NEW.updated_at = now();
-    RETURN NEW;
-END;
-$$ LANGUAGE plpgsql;
+Responsible for:
+  1. Making sure `schema_version` exists.
+  2. On a completely fresh database, applying the baseline
+     (schema.sql -> indexes.sql -> functions.sql -> triggers.sql -> views.sql)
+     as version 1.
+  3. Discovering every *.sql file in database/migrations/, in numeric-prefix
+     order, and applying any whose version is newer than what's recorded.
+  4. Recording the new version after each successful migration, inside the
+     same transaction as the migration itself (so a failure never leaves a
+     half-applied migration marked as done).
+  5. Retrying transient connection errors, and raising a clear, final error
+     (for migrate.py to report via Telegram) when a migration fails for real.
 
--- -----------------------------------------------------------------------------
--- features — generic per-post extracted feature store (key/value)
--- -----------------------------------------------------------------------------
-CREATE TABLE IF NOT EXISTS features (
-    id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    post_id             UUID NOT NULL REFERENCES posts(id) ON DELETE CASCADE,
-    feature_key         TEXT NOT NULL,
-    feature_value       NUMERIC(18, 6),
-    feature_value_text  TEXT,
-    source              TEXT,
-    extracted_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
-    created_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
-    UNIQUE (post_id, feature_key)
-);
+No other module should read database/migrations/ directly.
+"""
+from __future__ import annotations
 
--- -----------------------------------------------------------------------------
--- scores — generic per-post computed scores (several scoring methods coexist)
--- -----------------------------------------------------------------------------
-CREATE TABLE IF NOT EXISTS scores (
-    id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    post_id             UUID NOT NULL REFERENCES posts(id) ON DELETE CASCADE,
-    score_type          TEXT NOT NULL,
-    score_value         NUMERIC(10, 4) NOT NULL,
-    method_version      TEXT,
-    computed_at         TIMESTAMPTZ NOT NULL DEFAULT now(),
-    created_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
-    UNIQUE (post_id, score_type, method_version)
-);
+import logging
+import re
+import time
+from dataclasses import dataclass
+from pathlib import Path
+from typing import List, Optional
 
--- -----------------------------------------------------------------------------
--- knowledge_versions — immutable snapshot markers of "what the system believed"
--- -----------------------------------------------------------------------------
-CREATE TABLE IF NOT EXISTS knowledge_versions (
-    id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    version_number      INTEGER NOT NULL UNIQUE,
-    summary             TEXT,
-    is_active           BOOLEAN NOT NULL DEFAULT FALSE,
-    created_at          TIMESTAMPTZ NOT NULL DEFAULT now()
-);
+from sqlalchemy import Engine, text
+from sqlalchemy.exc import OperationalError
 
--- -----------------------------------------------------------------------------
--- knowledge_rules — executable rules produced by the learning loop
--- -----------------------------------------------------------------------------
-CREATE TABLE IF NOT EXISTS knowledge_rules (
-    id                      UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    knowledge_version_id    UUID REFERENCES knowledge_versions(id) ON DELETE SET NULL,
-    name                    TEXT NOT NULL,
-    conditions              JSONB NOT NULL,
-    action                  JSONB NOT NULL,
-    weight                  NUMERIC(10, 4) NOT NULL DEFAULT 1.0,
-    confidence              NUMERIC(5, 4),
-    evidence_count          INTEGER NOT NULL DEFAULT 0,
-    lifecycle_state         TEXT NOT NULL DEFAULT 'proposed'
-                                CHECK (lifecycle_state IN ('proposed', 'active', 'suspended', 'retired')),
-    created_at              TIMESTAMPTZ NOT NULL DEFAULT now(),
-    updated_at              TIMESTAMPTZ NOT NULL DEFAULT now()
-);
+logger = logging.getLogger("database.migration_manager")
 
--- -----------------------------------------------------------------------------
--- rule_lifecycle_events — audit trail of every state change of a knowledge_rule
--- -----------------------------------------------------------------------------
-CREATE TABLE IF NOT EXISTS rule_lifecycle_events (
-    id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    rule_id             UUID NOT NULL REFERENCES knowledge_rules(id) ON DELETE CASCADE,
-    from_state          TEXT,
-    to_state            TEXT NOT NULL,
-    reason              TEXT,
-    occurred_at         TIMESTAMPTZ NOT NULL DEFAULT now()
-);
+DATABASE_DIR = Path(__file__).resolve().parent
+MIGRATIONS_DIR = DATABASE_DIR / "migrations"
 
--- -----------------------------------------------------------------------------
--- hypotheses — candidate beliefs awaiting experimental validation
--- -----------------------------------------------------------------------------
-CREATE TABLE IF NOT EXISTS hypotheses (
-    id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    statement           TEXT NOT NULL,
-    rationale           TEXT,
-    status              TEXT NOT NULL DEFAULT 'open'
-                            CHECK (status IN ('open', 'testing', 'confirmed', 'rejected', 'inconclusive')),
-    confidence          NUMERIC(5, 4),
-    created_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
-    evaluated_at        TIMESTAMPTZ
-);
+BASELINE_VERSION = 1
+BASELINE_NAME = "0001_initial_schema"
+BASELINE_FILES = [
+    DATABASE_DIR / "schema.sql",
+    DATABASE_DIR / "indexes.sql",
+    DATABASE_DIR / "functions.sql",
+    DATABASE_DIR / "triggers.sql",
+    DATABASE_DIR / "views.sql",
+]
 
--- -----------------------------------------------------------------------------
--- experiments — concrete, run-able tests of a hypothesis
--- -----------------------------------------------------------------------------
-CREATE TABLE IF NOT EXISTS experiments (
-    id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    hypothesis_id       UUID NOT NULL REFERENCES hypotheses(id) ON DELETE CASCADE,
-    name                TEXT NOT NULL,
-    variant_config      JSONB,
-    status              TEXT NOT NULL DEFAULT 'planned'
-                            CHECK (status IN ('planned', 'running', 'completed', 'aborted')),
-    started_at          TIMESTAMPTZ,
-    ended_at            TIMESTAMPTZ,
-    result_summary      TEXT,
-    result_data         JSONB,
-    created_at          TIMESTAMPTZ NOT NULL DEFAULT now()
-);
+MIGRATION_FILENAME_RE = re.compile(r"^(\d{4,})_([a-zA-Z0-9_]+)\.sql$")
 
--- -----------------------------------------------------------------------------
--- memory_entries — long-lived key/value knowledge recalled across cycles
--- -----------------------------------------------------------------------------
-CREATE TABLE IF NOT EXISTS memory_entries (
-    id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    memory_key          TEXT NOT NULL UNIQUE,
-    memory_value        JSONB NOT NULL,
-    category            TEXT,
-    importance          NUMERIC(5, 4) NOT NULL DEFAULT 0.5,
-    expires_at          TIMESTAMPTZ,
-    created_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
-    updated_at          TIMESTAMPTZ NOT NULL DEFAULT now()
-);
+RETRYABLE_ATTEMPTS = 3
+RETRYABLE_BASE_SECONDS = 2
 
--- -----------------------------------------------------------------------------
--- weekly_plans — the strategic plan produced at the start of each week
--- -----------------------------------------------------------------------------
-CREATE TABLE IF NOT EXISTS weekly_plans (
-    id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    week_start_date     DATE NOT NULL UNIQUE,
-    week_end_date       DATE NOT NULL,
-    plan                JSONB NOT NULL,
-    status              TEXT NOT NULL DEFAULT 'draft'
-                            CHECK (status IN ('draft', 'active', 'completed', 'superseded')),
-    created_at          TIMESTAMPTZ NOT NULL DEFAULT now()
-);
 
--- -----------------------------------------------------------------------------
--- strategy_history — every change to overall strategy, before/after + why
--- -----------------------------------------------------------------------------
-CREATE TABLE IF NOT EXISTS strategy_history (
-    id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    strategy_name       TEXT NOT NULL,
-    changed_from        JSONB,
-    changed_to          JSONB NOT NULL,
-    reason              TEXT,
-    effective_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
-    created_at          TIMESTAMPTZ NOT NULL DEFAULT now()
-);
+class MigrationError(Exception):
+    """A migration failed after all retries. Non-retryable / final."""
 
--- -----------------------------------------------------------------------------
--- decision_logs — every autonomous decision, with context + reasoning
--- -----------------------------------------------------------------------------
-CREATE TABLE IF NOT EXISTS decision_logs (
-    id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    decision_type       TEXT NOT NULL,
-    related_post_id     UUID REFERENCES posts(id) ON DELETE SET NULL,
-    context             JSONB,
-    chosen_action       JSONB,
-    reasoning           TEXT,
-    confidence          NUMERIC(5, 4),
-    created_at          TIMESTAMPTZ NOT NULL DEFAULT now()
-);
 
--- -----------------------------------------------------------------------------
--- confidence_scores — generic confidence score for any subject
--- -----------------------------------------------------------------------------
-CREATE TABLE IF NOT EXISTS confidence_scores (
-    id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    subject_type        TEXT NOT NULL,
-    subject_id          UUID NOT NULL,
-    score               NUMERIC(5, 4) NOT NULL,
-    method              TEXT,
-    computed_at         TIMESTAMPTZ NOT NULL DEFAULT now()
-);
+@dataclass(frozen=True)
+class Migration:
+    version: int
+    name: str
+    path: Path
 
--- -----------------------------------------------------------------------------
--- quality_results — Quality Gate outcomes for candidate posts before publish
--- -----------------------------------------------------------------------------
-CREATE TABLE IF NOT EXISTS quality_results (
-    id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    post_id             UUID NOT NULL REFERENCES posts(id) ON DELETE CASCADE,
-    gate_name           TEXT NOT NULL,
-    passed              BOOLEAN NOT NULL,
-    score               NUMERIC(6, 3),
-    details             JSONB,
-    checked_at          TIMESTAMPTZ NOT NULL DEFAULT now()
-);
+    @property
+    def sql(self) -> str:
+        return self.path.read_text(encoding="utf-8")
 
--- -----------------------------------------------------------------------------
--- engine_health — heartbeat/status of every autonomous engine
--- -----------------------------------------------------------------------------
-CREATE TABLE IF NOT EXISTS engine_health (
-    id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    engine_name         TEXT NOT NULL UNIQUE,
-    status              TEXT NOT NULL DEFAULT 'unknown'
-                            CHECK (status IN ('unknown', 'healthy', 'degraded', 'down')),
-    last_run_at         TIMESTAMPTZ,
-    last_success_at     TIMESTAMPTZ,
-    last_error          TEXT,
-    metadata            JSONB,
-    updated_at          TIMESTAMPTZ NOT NULL DEFAULT now()
-);
 
--- -----------------------------------------------------------------------------
--- notifications — outbound notification log (Telegram today, others later)
--- -----------------------------------------------------------------------------
-CREATE TABLE IF NOT EXISTS notifications (
-    id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    channel             TEXT NOT NULL,
-    severity            TEXT NOT NULL DEFAULT 'info'
-                            CHECK (severity IN ('info', 'warning', 'critical')),
-    title               TEXT,
-    message             TEXT NOT NULL,
-    status              TEXT NOT NULL DEFAULT 'pending'
-                            CHECK (status IN ('pending', 'sent', 'failed')),
-    metadata            JSONB,
-    sent_at             TIMESTAMPTZ,
-    created_at          TIMESTAMPTZ NOT NULL DEFAULT now()
-);
+def _is_transient(error: OperationalError) -> bool:
+    """Heuristic for 'worth retrying' vs 'a genuinely broken migration'.
+    Connection resets / timeouts / server-not-ready are transient; SQL
+    syntax errors or constraint violations surface as ProgrammingError /
+    IntegrityError and are never retried."""
+    message = str(error).lower()
+    transient_markers = (
+        "could not connect", "connection reset", "connection refused",
+        "timeout", "server closed the connection", "terminating connection",
+        "the database system is starting up",
+    )
+    return any(marker in message for marker in transient_markers)
 
--- -----------------------------------------------------------------------------
--- event_logs — append-only backbone for the Event-Driven engines of Phase 2
--- -----------------------------------------------------------------------------
-CREATE TABLE IF NOT EXISTS event_logs (
-    id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    event_type          TEXT NOT NULL,
-    source              TEXT NOT NULL,
-    payload             JSONB,
-    occurred_at         TIMESTAMPTZ NOT NULL DEFAULT now()
-);
 
--- -----------------------------------------------------------------------------
--- system_settings — generic key/value config store (flags, thresholds)
--- -----------------------------------------------------------------------------
-CREATE TABLE IF NOT EXISTS system_settings (
-    key                 TEXT PRIMARY KEY,
-    value               JSONB NOT NULL,
-    description         TEXT,
-    updated_at          TIMESTAMPTZ NOT NULL DEFAULT now()
-);
+def discover_migrations() -> List[Migration]:
+    """Returns migrations/*.sql sorted by numeric prefix. The baseline
+    (version 1) is NOT included here — it lives in BASELINE_FILES and is
+    applied separately by ensure_baseline(). File names must look like
+    0002_add_something.sql; anything else is skipped with a warning."""
+    if not MIGRATIONS_DIR.exists():
+        return []
 
--- -----------------------------------------------------------------------------
--- prompt_versions — every prompt template used to generate content, versioned
--- -----------------------------------------------------------------------------
-CREATE TABLE IF NOT EXISTS prompt_versions (
-    id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    name                TEXT NOT NULL,
-    version             TEXT NOT NULL,
-    template            TEXT NOT NULL,
-    variables           JSONB,
-    is_active           BOOLEAN NOT NULL DEFAULT FALSE,
-    created_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
-    UNIQUE (name, version)
-);
+    migrations: List[Migration] = []
+    for path in sorted(MIGRATIONS_DIR.iterdir()):
+        if not path.is_file():
+            continue
+        match = MIGRATION_FILENAME_RE.match(path.name)
+        if not match:
+            if path.suffix == ".sql":
+                logger.warning("Skipping migration file with unexpected name: %s", path.name)
+            continue
+        version = int(match.group(1))
+        if version == BASELINE_VERSION:
+            # 0001 is reserved for the baseline files above; a stray
+            # migrations/0001_*.sql would silently never run otherwise.
+            raise MigrationError(
+                f"migrations/{path.name} uses version 1, which is reserved for the "
+                f"baseline (schema.sql/indexes.sql/...). Start new migrations at 0002."
+            )
+        migrations.append(Migration(version=version, name=match.group(2), path=path))
 
--- -----------------------------------------------------------------------------
--- model_versions — every AI model/provider version used in the pipeline
--- -----------------------------------------------------------------------------
-CREATE TABLE IF NOT EXISTS model_versions (
-    id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    provider            TEXT NOT NULL,
-    model_name          TEXT NOT NULL,
-    version             TEXT,
-    purpose             TEXT,
-    is_active           BOOLEAN NOT NULL DEFAULT FALSE,
-    created_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
-    UNIQUE (provider, model_name, version)
-);
+    migrations.sort(key=lambda m: m.version)
 
--- -----------------------------------------------------------------------------
--- failures — structured failure log for any part of the system
--- -----------------------------------------------------------------------------
-CREATE TABLE IF NOT EXISTS failures (
-    id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    source              TEXT NOT NULL,
-    failure_type        TEXT NOT NULL,
-    message             TEXT NOT NULL,
-    context             JSONB,
-    occurred_at         TIMESTAMPTZ NOT NULL DEFAULT now(),
-    resolved            BOOLEAN NOT NULL DEFAULT FALSE,
-    resolved_at         TIMESTAMPTZ
-);
+    seen_versions = set()
+    for m in migrations:
+        if m.version in seen_versions:
+            raise MigrationError(f"Duplicate migration version {m.version} in database/migrations/.")
+        seen_versions.add(m.version)
 
--- -----------------------------------------------------------------------------
--- explainability_notes — human-readable "why" for any subject
--- -----------------------------------------------------------------------------
-CREATE TABLE IF NOT EXISTS explainability_notes (
-    id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    subject_type        TEXT NOT NULL,
-    subject_id          UUID NOT NULL,
-    explanation         TEXT NOT NULL,
-    factors             JSONB,
-    created_at          TIMESTAMPTZ NOT NULL DEFAULT now()
-);
+    return migrations
 
--- =============================================================================
--- indexes
--- =============================================================================
-CREATE INDEX IF NOT EXISTS idx_features_post_id                 ON features (post_id);
-CREATE INDEX IF NOT EXISTS idx_features_key                     ON features (feature_key);
 
-CREATE INDEX IF NOT EXISTS idx_scores_post_id                   ON scores (post_id);
-CREATE INDEX IF NOT EXISTS idx_scores_type                      ON scores (score_type);
+class MigrationManager:
+    def __init__(self, engine: Engine):
+        self.engine = engine
 
-CREATE INDEX IF NOT EXISTS idx_knowledge_rules_state             ON knowledge_rules (lifecycle_state);
-CREATE INDEX IF NOT EXISTS idx_knowledge_rules_version            ON knowledge_rules (knowledge_version_id);
+    # -- schema_version bookkeeping -----------------------------------------
 
-CREATE INDEX IF NOT EXISTS idx_rule_lifecycle_events_rule_id      ON rule_lifecycle_events (rule_id);
+    def ensure_schema_version_table(self) -> None:
+        with self.engine.begin() as conn:
+            conn.execute(text(
+                """
+                CREATE TABLE IF NOT EXISTS schema_version (
+                    version      INTEGER PRIMARY KEY,
+                    name         TEXT NOT NULL,
+                    applied_at   TIMESTAMPTZ NOT NULL DEFAULT now()
+                )
+                """
+            ))
 
-CREATE INDEX IF NOT EXISTS idx_hypotheses_status                  ON hypotheses (status);
+    def get_current_version(self) -> int:
+        with self.engine.connect() as conn:
+            result = conn.execute(text("SELECT COALESCE(MAX(version), 0) FROM schema_version"))
+            return int(result.scalar_one())
 
-CREATE INDEX IF NOT EXISTS idx_experiments_hypothesis_id           ON experiments (hypothesis_id);
-CREATE INDEX IF NOT EXISTS idx_experiments_status                  ON experiments (status);
+    # -- applying migrations ---------------------------------------------------
 
-CREATE INDEX IF NOT EXISTS idx_memory_entries_category              ON memory_entries (category);
+    def _run_with_retry(self, description: str, run_once) -> None:
+        last_error: Optional[Exception] = None
+        for attempt in range(1, RETRYABLE_ATTEMPTS + 1):
+            try:
+                run_once()
+                return
+            except OperationalError as e:
+                last_error = e
+                if not _is_transient(e) or attempt == RETRYABLE_ATTEMPTS:
+                    raise MigrationError(f"{description} failed: {e}") from e
+                wait = RETRYABLE_BASE_SECONDS * (2 ** (attempt - 1))
+                logger.warning(
+                    "%s failed on attempt %d/%d with a transient error, retrying in %ds: %s",
+                    description, attempt, RETRYABLE_ATTEMPTS, wait, e,
+                )
+                time.sleep(wait)
+        if last_error:  # pragma: no cover - defensive
+            raise MigrationError(f"{description} failed: {last_error}") from last_error
 
-CREATE INDEX IF NOT EXISTS idx_weekly_plans_status                  ON weekly_plans (status);
+    def ensure_baseline(self) -> bool:
+        """Applies schema.sql/indexes.sql/functions.sql/triggers.sql/views.sql
+        as version 1, exactly once, inside a single transaction. Returns True
+        if it applied the baseline just now, False if it was already applied."""
+        if self.get_current_version() >= BASELINE_VERSION:
+            return False
 
-CREATE INDEX IF NOT EXISTS idx_strategy_history_name                ON strategy_history (strategy_name);
+        missing = [f for f in BASELINE_FILES if not f.exists()]
+        if missing:
+            raise MigrationError(
+                "Missing baseline SQL file(s): " + ", ".join(str(f) for f in missing)
+            )
 
-CREATE INDEX IF NOT EXISTS idx_decision_logs_type                   ON decision_logs (decision_type);
-CREATE INDEX IF NOT EXISTS idx_decision_logs_post_id                ON decision_logs (related_post_id);
+        def _apply() -> None:
+            with self.engine.begin() as conn:
+                for file_path in BASELINE_FILES:
+                    logger.info("Applying baseline file: %s", file_path.name)
+                    conn.execute(text(file_path.read_text(encoding="utf-8")))
+                conn.execute(
+                    text("INSERT INTO schema_version (version, name) VALUES (:v, :n)"),
+                    {"v": BASELINE_VERSION, "n": BASELINE_NAME},
+                )
 
-CREATE INDEX IF NOT EXISTS idx_confidence_scores_subject             ON confidence_scores (subject_type, subject_id);
+        self._run_with_retry("Baseline schema creation (version 1)", _apply)
+        logger.info("Baseline schema applied (version %d).", BASELINE_VERSION)
+        return True
 
-CREATE INDEX IF NOT EXISTS idx_quality_results_post_id                ON quality_results (post_id);
-CREATE INDEX IF NOT EXISTS idx_quality_results_gate                   ON quality_results (gate_name);
+    def apply_migration(self, migration: Migration) -> None:
+        def _apply() -> None:
+            with self.engine.begin() as conn:
+                conn.execute(text(migration.sql))
+                conn.execute(
+                    text("INSERT INTO schema_version (version, name) VALUES (:v, :n)"),
+                    {"v": migration.version, "n": migration.name},
+                )
 
-CREATE INDEX IF NOT EXISTS idx_notifications_status                    ON notifications (status);
+        self._run_with_retry(f"Migration {migration.version:04d}_{migration.name}", _apply)
+        logger.info("Applied migration %04d_%s.", migration.version, migration.name)
 
-CREATE INDEX IF NOT EXISTS idx_event_logs_type                          ON event_logs (event_type);
-CREATE INDEX IF NOT EXISTS idx_event_logs_occurred_at                    ON event_logs (occurred_at);
+    def ensure_trigger_helpers(self) -> None:
+        """Ensure trigger helpers exist on databases with an incomplete baseline."""
+        with self.engine.begin() as conn:
+            conn.execute(text(
+                """
+                CREATE OR REPLACE FUNCTION set_updated_at()
+                RETURNS TRIGGER AS $$
+                BEGIN
+                    NEW.updated_at = now();
+                    RETURN NEW;
+                END;
+                $$ LANGUAGE plpgsql;
+                """
+            ))
 
-CREATE INDEX IF NOT EXISTS idx_prompt_versions_name                       ON prompt_versions (name);
+    def run_pending(self) -> List[str]:
+        """Ensures schema_version exists, applies the baseline if needed,
+        then applies every pending migrations/*.sql file in order. Returns
+        the list of migration labels that were applied (for reporting)."""
+        applied: List[str] = []
 
-CREATE INDEX IF NOT EXISTS idx_model_versions_purpose                      ON model_versions (purpose);
+        self.ensure_schema_version_table()
+        if self.ensure_baseline():
+            applied.append(BASELINE_NAME)
 
-CREATE INDEX IF NOT EXISTS idx_failures_source                             ON failures (source);
-CREATE INDEX IF NOT EXISTS idx_failures_resolved                            ON failures (resolved);
+        current_version = self.get_current_version()
+        self.ensure_trigger_helpers()
+        pending = [m for m in discover_migrations() if m.version > current_version]
 
-CREATE INDEX IF NOT EXISTS idx_explainability_notes_subject                  ON explainability_notes (subject_type, subject_id);
+        for migration in pending:
+            self.apply_migration(migration)
+            applied.append(f"{migration.version:04d}_{migration.name}")
 
--- =============================================================================
--- triggers — keep updated_at current on the new mutable tables
--- (reuses set_updated_at() from functions.sql, applied in version 1)
--- =============================================================================
-DROP TRIGGER IF EXISTS trg_knowledge_rules_set_updated_at ON knowledge_rules;
-CREATE TRIGGER trg_knowledge_rules_set_updated_at
-    BEFORE UPDATE ON knowledge_rules
-    FOR EACH ROW
-    EXECUTE FUNCTION set_updated_at();
-
-DROP TRIGGER IF EXISTS trg_memory_entries_set_updated_at ON memory_entries;
-CREATE TRIGGER trg_memory_entries_set_updated_at
-    BEFORE UPDATE ON memory_entries
-    FOR EACH ROW
-    EXECUTE FUNCTION set_updated_at();
-
-DROP TRIGGER IF EXISTS trg_engine_health_set_updated_at ON engine_health;
-CREATE TRIGGER trg_engine_health_set_updated_at
-    BEFORE UPDATE ON engine_health
-    FOR EACH ROW
-    EXECUTE FUNCTION set_updated_at();
-
-DROP TRIGGER IF EXISTS trg_system_settings_set_updated_at ON system_settings;
-CREATE TRIGGER trg_system_settings_set_updated_at
-    BEFORE UPDATE ON system_settings
-    FOR EACH ROW
-    EXECUTE FUNCTION set_updated_at();
+        return applied
