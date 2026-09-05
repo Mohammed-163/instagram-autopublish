@@ -166,7 +166,23 @@ class GeminiClient:
   "focus_areas": ["area1", "area2"],
   "avoid_topics": ["topic_to_avoid"]
 }}"""
-        return self._extract_json(self._call_with_fallback(prompt))
+        required = [
+            "strategy_summary",
+            "recommended_topics",
+            "post_frequency",
+            "focus_areas",
+            "avoid_topics",
+        ]
+        for attempt in range(3):
+            raw = self._call_with_fallback(prompt)
+            try:
+                data = self._extract_json(raw)
+                if not all(key in data for key in required):
+                    continue
+                return data
+            except (json.JSONDecodeError, ValueError):
+                continue
+        raise ValueError("Failed to generate valid weekly plan after 3 attempts")
 
     def diagnose_workflow_error(self, error_log: str) -> str:
         prompt = f"""أنت مهندس DevOps خبير. حلل هذا الخطأ واقترح الإصلاح:
