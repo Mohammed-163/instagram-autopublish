@@ -36,6 +36,8 @@ Architectural rules enforced here:
 """
 from __future__ import annotations
 
+import os
+
 phase7_bootstrap = None
 
 from core.event_bus import EventBus, event_bus as default_event_bus
