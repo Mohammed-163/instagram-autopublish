@@ -17,6 +17,16 @@
 -- concept.
 -- =============================================================================
 
+-- Ensure the trigger helper exists even when an existing database was marked
+-- as having the baseline applied without successfully installing functions.sql.
+CREATE OR REPLACE FUNCTION set_updated_at()
+RETURNS TRIGGER AS $$
+BEGIN
+    NEW.updated_at = now();
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
 -- -----------------------------------------------------------------------------
 -- features — generic per-post extracted feature store (key/value)
 -- -----------------------------------------------------------------------------
