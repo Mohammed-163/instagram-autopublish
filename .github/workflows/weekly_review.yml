@@ -13,10 +13,10 @@ jobs:
       - run: pip install -r requirements.txt google-genai --quiet
       - name: Run weekly_review.py
         env:
-          DATABASE_URL: \${{ secrets.DATABASE_URL }}
-          GEMINI_API_KEY_1: \${{ secrets.GEMINI_API_KEY_1 }}
-          GEMINI_API_KEY_2: \${{ secrets.GEMINI_API_KEY_2 }}
-          GEMINI_API_KEY_3: \${{ secrets.GEMINI_API_KEY_3 }}
-          TELEGRAM_BOT_TOKEN: \${{ secrets.TELEGRAM_BOT_TOKEN }}
-          TELEGRAM_CHAT_ID: \${{ secrets.TELEGRAM_CHAT_ID }}
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          GEMINI_API_KEY_1: ${{ secrets.GEMINI_API_KEY_1 }}
+          GEMINI_API_KEY_2: ${{ secrets.GEMINI_API_KEY_2 }}
+          GEMINI_API_KEY_3: ${{ secrets.GEMINI_API_KEY_3 }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: python phase5_6/scripts/weekly_review.py
