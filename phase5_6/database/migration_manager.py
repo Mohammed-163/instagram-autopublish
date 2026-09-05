@@ -221,11 +221,11 @@ class MigrationManager:
         applied: List[str] = []
 
         self.ensure_schema_version_table()
+        self.ensure_trigger_helpers()
         if self.ensure_baseline():
             applied.append(BASELINE_NAME)
 
         current_version = self.get_current_version()
-        self.ensure_trigger_helpers()
         pending = [m for m in discover_migrations() if m.version > current_version]
 
         for migration in pending:
