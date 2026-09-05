@@ -190,6 +190,12 @@ class MigrationManager:
     def apply_migration(self, migration: Migration) -> None:
         def _apply() -> None:
             with self.engine.begin() as conn:
+                logger.info(
+                    "Migration SQL diagnostics: length=%d, first50=%r, last50=%r",
+                    len(migration.sql),
+                    migration.sql[:50],
+                    migration.sql[-50:],
+                )
                 conn.execute(text(migration.sql))
                 conn.execute(
                     text("INSERT INTO schema_version (version, name) VALUES (:v, :n)"),
