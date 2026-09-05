@@ -2,6 +2,7 @@
 from __future__ import annotations
 import os
 import sys
+import traceback
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from core.container import container
 from core.wiring import wire_default_subscribers
@@ -18,6 +19,8 @@ def main() -> int:
         notifier.notify_success("تمت مراجعة الأداء الأسبوعية وتفعيل الخطة الجديدة")
         return 0
     except Exception as exc:
+        print(f"Weekly review failed: {exc}", file=sys.stderr)
+        traceback.print_exc()
         notifier.alert_critical("خطأ في مراجعة الأداء الأسبوعية", str(exc))
         return 1
 
