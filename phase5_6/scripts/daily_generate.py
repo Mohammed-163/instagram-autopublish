@@ -62,6 +62,41 @@ def _fetch_vetted_background(pixabay, gemini, pixabay_query: str, topic_summary:
     return chosen
 
 
+def _fetch_vetted_video(
+    pixabay, gemini, pixabay_query: str, topic_summary: str, tmpdir: str
+) -> str | None:
+    """Download, review, and return an original accepted Pixabay video."""
+    try:
+        candidates = pixabay.download_video_candidates(
+            pixabay_query, tmpdir, n=config.IMAGE_CANDIDATE_COUNT,
+        )
+        if not candidates:
+            return None
+
+        review_copies = []
+        for i, video_path in enumerate(candidates):
+            review_path = os.path.join(tmpdir, f"review_{i}.mp4")
+            try:
+                pixabay.create_review_copy(video_path, review_path)
+                review_copies.append(review_path)
+            except Exception as e:
+                print(f"⚠️ Failed to create review copy for {video_path}: {e}")
+                continue
+
+        if not review_copies:
+            return None
+
+        selected_review = gemini.select_best_video(review_copies, topic_summary)
+        if selected_review is None:
+            return None
+
+        idx = review_copies.index(selected_review)
+        return candidates[idx]
+    except Exception as e:
+        print(f"⚠️ Video pipeline failed, falling back to images: {e}")
+        return None
+
+
 def today_baghdad() -> datetime:
     return datetime.now(pytz.timezone(config.BAGHDAD_TZ))
 
@@ -177,6 +212,7 @@ def main():
                 bg_file_id = (plan or {}).get(f"post_{i}_bg_file_id")
                 with tempfile.TemporaryDirectory() as tmpdir:
                     bg_path = os.path.join(tmpdir, "bg.jpg")
+                    is_video_background = False
                     if bg_file_id:
                         # Pre-selected asset from the monthly plan is assumed
                         # already vetted (manually placed) — download as-is.
@@ -186,9 +222,24 @@ def main():
                         final_pixabay_query = content["pixabay_query"]
                         if visual_mood:
                             final_pixabay_query = f"{content['pixabay_query']} {visual_mood}"
-                        bg_path = _fetch_vetted_background(
-                            pixabay, gemini, final_pixabay_query, topic_summary, tmpdir,
-                        )
+                        if config.PIXABAY_VIDEO_MODE:
+                            video_path = _fetch_vetted_video(
+                                pixabay, gemini, final_pixabay_query, topic_summary, tmpdir,
+                            )
+                            if video_path is not None:
+                                bg_path = video_path
+                                is_video_background = True
+                            else:
+                                print("⚠️ No acceptable video found, falling back to image path")
+                                bg_path = _fetch_vetted_background(
+                                    pixabay, gemini, final_pixabay_query, topic_summary, tmpdir,
+                                )
+                                is_video_background = False
+                        else:
+                            bg_path = _fetch_vetted_background(
+                                pixabay, gemini, final_pixabay_query, topic_summary, tmpdir,
+                            )
+                            is_video_background = False
 
                     video_path = video_creator.build_post_video(
                         bg_path, content["hook_line"], content["fact_line"], content["cta_line"],
