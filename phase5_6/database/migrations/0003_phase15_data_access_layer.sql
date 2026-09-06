@@ -84,7 +84,7 @@ SELECT
     e.status,
     h.status as hypothesis_status,
     count(e.id) as experiment_count
-FROM experiments e
+FROM intelligence_experiments e
 JOIN hypotheses h ON e.hypothesis_id = h.id
 GROUP BY e.status, h.status;
 
@@ -428,7 +428,7 @@ CREATE INDEX IF NOT EXISTS idx_failures_occurred_at ON failures (occurred_at);
 CREATE INDEX IF NOT EXISTS idx_confidence_scores_computed_at ON confidence_scores (computed_at);
 CREATE INDEX IF NOT EXISTS idx_scores_computed_at ON scores (computed_at);
 CREATE INDEX IF NOT EXISTS idx_features_extracted_at ON features (extracted_at);
-CREATE INDEX IF NOT EXISTS idx_experiments_started_at ON experiments (started_at);
+CREATE INDEX IF NOT EXISTS idx_experiments_started_at ON intelligence_experiments (started_at);
 CREATE INDEX IF NOT EXISTS idx_weekly_plans_week_start ON weekly_plans (week_start_date);
 CREATE INDEX IF NOT EXISTS idx_quality_results_checked_at ON quality_results (checked_at);
 
@@ -450,9 +450,9 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
-DROP TRIGGER IF EXISTS trg_validate_experiment_status ON experiments;
+DROP TRIGGER IF EXISTS trg_validate_experiment_status ON intelligence_experiments;
 CREATE TRIGGER trg_validate_experiment_status
-BEFORE UPDATE OF status ON experiments
+BEFORE UPDATE OF status ON intelligence_experiments
 FOR EACH ROW EXECUTE FUNCTION validate_experiment_status_transition();
 
 CREATE OR REPLACE FUNCTION validate_knowledge_rule_lifecycle()
