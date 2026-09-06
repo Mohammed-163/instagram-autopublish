@@ -83,6 +83,11 @@ class WeeklyPerformanceReviewEngine:
         summary["by_background_type"] = self._averages(summary["by_background_type"])
         plan = self.gemini_client.build_weekly_plan(summary)
         plan_id = uuid.uuid4()
+        today = now.date()
+        existing = self.weekly_planning_service.get_by_week_start(today)
+        if existing is not None:
+            logger.info("خطة هذا الأسبوع (week_start=%s) موجودة بالفعل، تجاوز الإنشاء", today)
+            return
         self.weekly_planning_service.create_plan(plan_id=plan_id, week_start=now,
             week_end=now + timedelta(days=7), plan_data=plan, status="draft")
         self.weekly_planning_service.activate_plan(plan_id)
