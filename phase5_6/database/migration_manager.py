@@ -188,6 +188,7 @@ class MigrationManager:
         return True
 
     def apply_migration(self, migration: Migration) -> None:
+        print(f"[TRACE] apply_migration() entered for version={migration.version}", flush=True)
         def _apply() -> None:
             with self.engine.begin() as conn:
                 print(
@@ -225,17 +226,26 @@ class MigrationManager:
         """Ensures schema_version exists, applies the baseline if needed,
         then applies every pending migrations/*.sql file in order. Returns
         the list of migration labels that were applied (for reporting)."""
+        print("[TRACE] run_pending() started", flush=True)
         applied: List[str] = []
 
         self.ensure_schema_version_table()
+        print("[TRACE] ensure_schema_version_table() done", flush=True)
         self.ensure_trigger_helpers()
-        if self.ensure_baseline():
+        print("[TRACE] ensure_trigger_helpers() done", flush=True)
+        baseline_applied = self.ensure_baseline()
+        print(f"[TRACE] ensure_baseline() returned {baseline_applied}", flush=True)
+        if baseline_applied:
             applied.append(BASELINE_NAME)
 
         current_version = self.get_current_version()
+        print(f"[TRACE] current_version={current_version}", flush=True)
         pending = [m for m in discover_migrations() if m.version > current_version]
+        print(f"[TRACE] discovered {len(discover_migrations())} total migrations, "
+              f"{len(pending)} pending: {[m.version for m in pending]}", flush=True)
 
         for migration in pending:
+            print(f"[TRACE] about to apply migration {migration.version}", flush=True)
             self.apply_migration(migration)
             applied.append(f"{migration.version:04d}_{migration.name}")
 
