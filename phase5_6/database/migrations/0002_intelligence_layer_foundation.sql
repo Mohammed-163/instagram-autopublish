@@ -57,9 +57,9 @@ CREATE TABLE IF NOT EXISTS scores (
 );
 
 -- -----------------------------------------------------------------------------
--- knowledge_versions — immutable snapshot markers of "what the system believed"
+-- intelligence_knowledge_versions — immutable snapshot markers of "what the system believed"
 -- -----------------------------------------------------------------------------
-CREATE TABLE IF NOT EXISTS knowledge_versions (
+CREATE TABLE IF NOT EXISTS intelligence_knowledge_versions (
     id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     version_number      INTEGER NOT NULL UNIQUE,
     summary             TEXT,
@@ -72,7 +72,7 @@ CREATE TABLE IF NOT EXISTS knowledge_versions (
 -- -----------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS knowledge_rules (
     id                      UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    knowledge_version_id    UUID REFERENCES knowledge_versions(id) ON DELETE SET NULL,
+    knowledge_version_id    UUID REFERENCES intelligence_knowledge_versions(id) ON DELETE SET NULL,
     name                    TEXT NOT NULL,
     conditions              JSONB NOT NULL,
     action                  JSONB NOT NULL,
