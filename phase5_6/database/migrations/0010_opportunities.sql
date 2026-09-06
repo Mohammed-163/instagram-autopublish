@@ -1,9 +1,9 @@
 -- Migration 0010: Opportunity Intelligence Layer (Phase C)
 -- Creates opportunities table with full lifecycle support and transition log.
 
-CREATE TABLE IF NOT EXISTS opportunities (
+CREATE TABLE IF NOT EXISTS intelligence_opportunities (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    parent_opportunity_id UUID REFERENCES opportunities(id) ON DELETE SET NULL,
+    parent_opportunity_id UUID REFERENCES intelligence_opportunities(id) ON DELETE SET NULL,
     opportunity_type TEXT NOT NULL,
     detector_name TEXT NOT NULL,
     detector_version TEXT NOT NULL DEFAULT '1.0.0',
@@ -33,12 +33,12 @@ CREATE TABLE IF NOT EXISTS opportunities (
     created_at     TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
 );
 
-CREATE INDEX IF NOT EXISTS idx_opportunities_status    ON opportunities (status);
-CREATE INDEX IF NOT EXISTS idx_opportunities_type      ON opportunities (opportunity_type);
-CREATE INDEX IF NOT EXISTS idx_opportunities_detector  ON opportunities (detector_name);
-CREATE INDEX IF NOT EXISTS idx_opportunities_score     ON opportunities (opportunity_score DESC);
-CREATE INDEX IF NOT EXISTS idx_opportunities_fingerprint ON opportunities (fingerprint);
-CREATE INDEX IF NOT EXISTS idx_opportunities_detected_at ON opportunities (detected_at DESC);
+CREATE INDEX IF NOT EXISTS idx_opportunities_status    ON intelligence_opportunities (status);
+CREATE INDEX IF NOT EXISTS idx_opportunities_type      ON intelligence_opportunities (opportunity_type);
+CREATE INDEX IF NOT EXISTS idx_opportunities_detector  ON intelligence_opportunities (detector_name);
+CREATE INDEX IF NOT EXISTS idx_opportunities_score     ON intelligence_opportunities (opportunity_score DESC);
+CREATE INDEX IF NOT EXISTS idx_opportunities_fingerprint ON intelligence_opportunities (fingerprint);
+CREATE INDEX IF NOT EXISTS idx_opportunities_detected_at ON intelligence_opportunities (detected_at DESC);
 
 -- -----------------------------------------------------------------------
 -- Lifecycle transition log
@@ -46,7 +46,7 @@ CREATE INDEX IF NOT EXISTS idx_opportunities_detected_at ON opportunities (detec
 -- -----------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS opportunity_transitions (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    opportunity_id UUID NOT NULL REFERENCES opportunities(id) ON DELETE CASCADE,
+    opportunity_id UUID NOT NULL REFERENCES intelligence_opportunities(id) ON DELETE CASCADE,
     from_status TEXT,
     to_status   TEXT NOT NULL,
     reason      TEXT,
