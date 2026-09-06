@@ -157,27 +157,43 @@ class GeminiClient:
 خلاصة أداء الأسبوع الماضي:
 {weekly_summary}
 
-أنشئ خطة محتوى للأسبوع القادم. إذا كانت الخلاصة فارغة فأنشئ خطة ابتدائية معقولة.
+أنشئ خطة محتوى يومية مفصلة للأسبوع القادم. إذا كانت الخلاصة فارغة فأنشئ خطة ابتدائية معقولة.
 أخرج JSON فقط:
 {{
-  "strategy_summary": "...",
-  "recommended_topics": ["topic1", "topic2"],
-  "post_frequency": "daily",
-  "focus_areas": ["area1", "area2"],
-  "avoid_topics": ["topic_to_avoid"]
+  "strategy_summary": "ملخص عام قصير للاستراتيجية هذا الأسبوع",
+  "days": {{
+    "sunday": {{"day_theme": "...", "visual_mood": "...", "post_count_target": 1}},
+    "monday": {{"day_theme": "...", "visual_mood": "...", "post_count_target": 1}},
+    "tuesday": {{"day_theme": "...", "visual_mood": "...", "post_count_target": 1}},
+    "wednesday": {{"day_theme": "...", "visual_mood": "...", "post_count_target": 1}},
+    "thursday": {{"day_theme": "...", "visual_mood": "...", "post_count_target": 1}},
+    "friday": {{"day_theme": "...", "visual_mood": "...", "post_count_target": 1}},
+    "saturday": {{"day_theme": "...", "visual_mood": "...", "post_count_target": 1}}
+  }},
+  "avoid_themes": ["موضوع أو نمط بصري يجب تجنبه هذا الأسبوع"]
 }}"""
         required = [
             "strategy_summary",
-            "recommended_topics",
-            "post_frequency",
-            "focus_areas",
-            "avoid_topics",
+            "days",
+            "avoid_themes",
         ]
+        expected_days = {
+            "sunday", "monday", "tuesday", "wednesday",
+            "thursday", "friday", "saturday",
+        }
+        required_day_fields = {"day_theme", "visual_mood", "post_count_target"}
         for attempt in range(3):
             raw = self._call_with_fallback(prompt)
             try:
                 data = self._extract_json(raw)
                 if not all(key in data for key in required):
+                    continue
+                days = data["days"]
+                if set(days) != expected_days or any(
+                    not isinstance(days[day], dict)
+                    or not required_day_fields.issubset(days[day])
+                    for day in expected_days
+                ):
                     continue
                 return data
             except (json.JSONDecodeError, ValueError):
