@@ -73,12 +73,25 @@ class GeminiClient:
     # ------------------------------------------------------------------
     # Content generation
     # ------------------------------------------------------------------
-    def generate_post_content(self, recent_topics: list, post_type: str = "quick_psychological_fact") -> dict:
+    def generate_post_content(
+        self,
+        recent_topics: list,
+        post_type: str = "quick_psychological_fact",
+        day_theme: str | None = None,
+        visual_mood: str | None = None,
+    ) -> dict:
         avoid_list = ", ".join(recent_topics) if recent_topics else "(لا يوجد سجل سابق بعد)"
+        day_context = ""
+        if day_theme is not None or visual_mood is not None:
+            day_context = (
+                f"\nوجّه المحتوى ليتماشى مع موضوع اليوم المخطط له: {day_theme} "
+                f"(بنبرة بصرية: {visual_mood}).\n"
+            )
 
         prompt = f"""أنت كاتب محتوى متخصص بـ"حقائق نفسية سريعة" لمنشورات انستغرام قصيرة (فئة: {post_type}).
 
 مواضيع نُشرت مسبقاً ويجب تجنب تكرارها: {avoid_list}
+{day_context}
 
 الملطوب: حقيقة نفسية واحدة، مثبتة علمياً وموثوقة فعلاً (وليست خرافة شائعة أو معلومة غير مؤكدة).
 إذا لم تكن متأكداً 100% من صحة معلومة معينة علمياً، اختر موضوعاً نفسياً آخر تكون واثقاً منه بدلاً منها.
