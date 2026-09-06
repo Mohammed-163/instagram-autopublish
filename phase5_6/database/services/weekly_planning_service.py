@@ -53,6 +53,9 @@ class WeeklyPlanningService:
             self.weekly_plans_repository.update(current_active.id, status="superseded")
         return self.weekly_plans_repository.update(plan_id, status="active")
 
+    def get_by_week_start(self, week_start_date):
+        return self.weekly_plans_repository.get_by_week_start(week_start_date)
+
     def complete_plan(self, plan_id: Any) -> Optional[WeeklyPlan]:
         return self.weekly_plans_repository.update(plan_id, status="completed")
 
