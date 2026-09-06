@@ -114,7 +114,7 @@ CREATE TABLE IF NOT EXISTS hypotheses (
 -- -----------------------------------------------------------------------------
 -- experiments — concrete, run-able tests of a hypothesis
 -- -----------------------------------------------------------------------------
-CREATE TABLE IF NOT EXISTS experiments (
+CREATE TABLE IF NOT EXISTS intelligence_experiments (
     id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     hypothesis_id       UUID NOT NULL REFERENCES hypotheses(id) ON DELETE CASCADE,
     name                TEXT NOT NULL,
@@ -330,8 +330,8 @@ CREATE INDEX IF NOT EXISTS idx_rule_lifecycle_events_rule_id      ON rule_lifecy
 
 CREATE INDEX IF NOT EXISTS idx_hypotheses_status                  ON hypotheses (status);
 
-CREATE INDEX IF NOT EXISTS idx_experiments_hypothesis_id           ON experiments (hypothesis_id);
-CREATE INDEX IF NOT EXISTS idx_experiments_status                  ON experiments (status);
+CREATE INDEX IF NOT EXISTS idx_experiments_hypothesis_id           ON intelligence_experiments (hypothesis_id);
+CREATE INDEX IF NOT EXISTS idx_experiments_status                  ON intelligence_experiments (status);
 
 CREATE INDEX IF NOT EXISTS idx_memory_entries_category              ON memory_entries (category);
 
