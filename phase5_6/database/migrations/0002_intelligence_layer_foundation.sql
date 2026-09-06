@@ -100,7 +100,7 @@ CREATE TABLE IF NOT EXISTS rule_lifecycle_events (
 -- -----------------------------------------------------------------------------
 -- hypotheses — candidate beliefs awaiting experimental validation
 -- -----------------------------------------------------------------------------
-CREATE TABLE IF NOT EXISTS hypotheses (
+CREATE TABLE IF NOT EXISTS intelligence_hypotheses (
     id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     statement           TEXT NOT NULL,
     rationale           TEXT,
@@ -116,7 +116,7 @@ CREATE TABLE IF NOT EXISTS hypotheses (
 -- -----------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS intelligence_experiments (
     id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    hypothesis_id       UUID NOT NULL REFERENCES hypotheses(id) ON DELETE CASCADE,
+    hypothesis_id       UUID NOT NULL REFERENCES intelligence_hypotheses(id) ON DELETE CASCADE,
     name                TEXT NOT NULL,
     variant_config      JSONB,
     status              TEXT NOT NULL DEFAULT 'planned'
@@ -158,7 +158,7 @@ CREATE TABLE IF NOT EXISTS weekly_plans (
 -- -----------------------------------------------------------------------------
 -- strategy_history — every change to overall strategy, before/after + why
 -- -----------------------------------------------------------------------------
-CREATE TABLE IF NOT EXISTS strategy_history (
+CREATE TABLE IF NOT EXISTS intelligence_strategy_history (
     id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     strategy_name       TEXT NOT NULL,
     changed_from        JSONB,
@@ -328,7 +328,7 @@ CREATE INDEX IF NOT EXISTS idx_knowledge_rules_version            ON knowledge_r
 
 CREATE INDEX IF NOT EXISTS idx_rule_lifecycle_events_rule_id      ON rule_lifecycle_events (rule_id);
 
-CREATE INDEX IF NOT EXISTS idx_hypotheses_status                  ON hypotheses (status);
+CREATE INDEX IF NOT EXISTS idx_hypotheses_status                  ON intelligence_hypotheses (status);
 
 CREATE INDEX IF NOT EXISTS idx_experiments_hypothesis_id           ON intelligence_experiments (hypothesis_id);
 CREATE INDEX IF NOT EXISTS idx_experiments_status                  ON intelligence_experiments (status);
@@ -337,7 +337,7 @@ CREATE INDEX IF NOT EXISTS idx_memory_entries_category              ON memory_en
 
 CREATE INDEX IF NOT EXISTS idx_weekly_plans_status                  ON weekly_plans (status);
 
-CREATE INDEX IF NOT EXISTS idx_strategy_history_name                ON strategy_history (strategy_name);
+CREATE INDEX IF NOT EXISTS idx_strategy_history_name                ON intelligence_strategy_history (strategy_name);
 
 CREATE INDEX IF NOT EXISTS idx_decision_logs_type                   ON decision_logs (decision_type);
 CREATE INDEX IF NOT EXISTS idx_decision_logs_post_id                ON decision_logs (related_post_id);
@@ -388,3 +388,4 @@ CREATE TRIGGER trg_system_settings_set_updated_at
     BEFORE UPDATE ON system_settings
     FOR EACH ROW
     EXECUTE FUNCTION set_updated_at();
+
