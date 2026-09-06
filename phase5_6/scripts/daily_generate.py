@@ -66,6 +66,28 @@ def today_baghdad() -> datetime:
     return datetime.now(pytz.timezone(config.BAGHDAD_TZ))
 
 
+def _get_today_theme_from_weekly_plan(now: datetime) -> tuple[str | None, str | None]:
+    """Read today's theme from the active weekly plan, failing open safely."""
+    try:
+        from core.container import container
+
+        planning_service = container.resolve("weekly_planning_service")
+        active_plan = planning_service.get_active_plan()
+        if active_plan is None:
+            return None, None
+        plan_data = active_plan.plan
+        if not isinstance(plan_data, dict) or "days" not in plan_data:
+            return None, None
+        day_name = now.strftime("%A").lower()
+        day_data = plan_data["days"].get(day_name)
+        if not isinstance(day_data, dict):
+            return None, None
+        return day_data.get("day_theme"), day_data.get("visual_mood")
+    except Exception as e:
+        print(f"⚠️ Failed to read weekly plan theme, continuing without it: {e}")
+        return None, None
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--dry-run", action="store_true")
@@ -82,6 +104,7 @@ def main():
             return
 
         now = today_baghdad()
+        day_theme, visual_mood = _get_today_theme_from_weekly_plan(now)
         date_str = now.strftime("%Y-%m-%d")
         month_label = now.strftime("%Y-%m")
 
@@ -113,7 +136,9 @@ def main():
                 recent_topics = sheets.get_recent_topics()
 
                 # ── Step 5: Generate core content ──────────────────────────
-                content = gemini.generate_post_content(recent_topics)
+                content = gemini.generate_post_content(
+                    recent_topics, day_theme=day_theme, visual_mood=visual_mood,
+                )
 
                 # ── Step 5b: Generate caption + hashtags ────────────────────
                 # generate_post_content does NOT produce caption_arabic or
