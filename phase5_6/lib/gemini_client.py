@@ -334,3 +334,54 @@ class GeminiClient:
 
         # Gemini returned an out-of-range index — treat as rejection.
         return None
+
+    def select_best_video(self, video_paths: list, topic: str) -> str | None:
+        """Vet candidate MP4 videos via Gemini and return the best acceptable path."""
+        if not video_paths:
+            return None
+
+        try:
+            from google import genai
+            from google.genai import types as genai_types
+        except Exception as exc:
+            print(f"⚠️ Gemini video vetting failed, likely unsupported input: {exc}")
+            return None
+
+        api_key = self._engine.image_check_key
+        if not api_key:
+            available = [k for k in self._engine.api_keys if k]
+            if not available:
+                print("⚠️ Gemini video vetting failed: no Gemini API key available")
+                return None
+            api_key = available[0]
+
+        for path in video_paths:
+            try:
+                with open(path, "rb") as fh:
+                    video_bytes = fh.read()
+                parts = [
+                    genai_types.Part.from_bytes(data=video_bytes, mime_type="video/mp4"),
+                    genai_types.Part.from_text(text=(
+                        f'هل هذا الفيديو مناسب كخلفية لمنشور عن: "{topic}"؟ '
+                        "تحقق من الملاءمة البصرية للموضوع وخلوه من العري، الكحول، "
+                        "السجائر، العنف، الدم، الجرائم، الرموز الدينية غير المحايدة، "
+                        "وأي محتوى غير لائق آخر. أخرج JSON فقط: "
+                        '{"accepted": true/false, "reason": "..."}'
+                    )),
+                ]
+                client = genai.Client(api_key=api_key)
+                resp = client.models.generate_content(
+                    model=config.IMAGE_VETTING_MODEL,
+                    contents=parts,
+                )
+                raw = resp.text
+                if raw is None:
+                    raise ValueError("empty response")
+                result = self._extract_json(raw)
+                if result.get("accepted") is True:
+                    return path
+            except Exception as exc:
+                print(f"⚠️ Gemini video vetting failed for {path!r}: {exc}")
+                continue
+
+        return None
