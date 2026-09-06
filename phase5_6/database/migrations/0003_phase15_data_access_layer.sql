@@ -85,7 +85,7 @@ SELECT
     h.status as hypothesis_status,
     count(e.id) as experiment_count
 FROM intelligence_experiments e
-JOIN hypotheses h ON e.hypothesis_id = h.id
+JOIN intelligence_hypotheses h ON e.hypothesis_id = h.id
 GROUP BY e.status, h.status;
 
 CREATE OR REPLACE VIEW v_knowledge_statistics AS
