@@ -183,8 +183,11 @@ def main():
                         drive.download_file(bg_file_id, bg_path)
                     else:
                         topic_summary = f"{content['hook_line']} — {content['fact_line']}"
+                        final_pixabay_query = content["pixabay_query"]
+                        if visual_mood:
+                            final_pixabay_query = f"{content['pixabay_query']} {visual_mood}"
                         bg_path = _fetch_vetted_background(
-                            pixabay, gemini, content["pixabay_query"], topic_summary, tmpdir,
+                            pixabay, gemini, final_pixabay_query, topic_summary, tmpdir,
                         )
 
                     video_path = video_creator.build_post_video(
