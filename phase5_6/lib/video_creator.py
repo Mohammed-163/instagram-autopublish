@@ -160,16 +160,19 @@ class VideoCreator:
         w_str, h_str = result.stdout.strip().split("x")
         return int(w_str), int(h_str)
 
-    def create_transparent_text_layer(self, lines: list, font_sizes: list, colors: list, output_path: str) -> str:
+    def create_transparent_text_layer(self, lines: list, font_sizes: list, colors: list,
+                                      output_path: str, start_y: int = None) -> str:
         """
-        يرسم مجموعة أسطر نصية على خلفية شفافة بالكامل (بدون overlay داكن وبدون خلفية صورة).
-        lines / font_sizes / colors يجب أن تكون بنفس الطول، وتُرسم بالتتابع من نفس نقطة البداية
-        العمودية المستخدمة في create_image لضمان تطابق موضع النص بصرياً بين المسارين.
+        يرسم مجموعة أسطر نصية على خلفية شفافة بالكامل.
+        start_y: نقطة البداية العمودية بالبكسل. إن كانت None، يُستخدم الافتراضي 0.32 من الارتفاع
+        (نفس سلوك create_image الأصلي، للحفاظ على التوافق مع الاستخدامات القديمة).
+        يُرجع الدالة الآن (output_path, ending_y) بدل output_path فقط، حيث ending_y هو
+        الموضع العمودي بعد آخر سطر مرسوم، لتمرير هذه القيمة كـ start_y لطبقة تالية.
         """
         img = Image.new("RGBA", (config.VIDEO_WIDTH, config.VIDEO_HEIGHT), (0, 0, 0, 0))
         draw = ImageDraw.Draw(img)
 
-        y = int(config.VIDEO_HEIGHT * 0.32)
+        y = start_y if start_y is not None else int(config.VIDEO_HEIGHT * 0.32)
         for text, size, color in zip(lines, font_sizes, colors):
             if not text:
                 continue
@@ -177,7 +180,7 @@ class VideoCreator:
             y = self._draw_centered_text(draw, text, font, color, y, config.VIDEO_WIDTH)
 
         img.save(output_path, "PNG")
-        return output_path
+        return output_path, y
 
     def build_post_video_from_video_bg(self, video_bg_path: str, hook: str, fact: str, cta: str,
                                         workdir: str, output_filename: str) -> str:
@@ -198,7 +201,7 @@ class VideoCreator:
         rest_overlay_path = os.path.join(workdir, "rest_overlay.png")
         output_path = os.path.join(workdir, output_filename)
 
-        self.create_transparent_text_layer(
+        _, hook_end_y = self.create_transparent_text_layer(
             lines=[hook],
             font_sizes=[config.FONT_SIZE_HOOK],
             colors=[config.COLOR_HOOK],
@@ -209,6 +212,7 @@ class VideoCreator:
             font_sizes=[config.FONT_SIZE_FACT, config.FONT_SIZE_CTA],
             colors=[config.COLOR_FACT, config.COLOR_CTA],
             output_path=rest_overlay_path,
+            start_y=hook_end_y,
         )
 
         music_path = music_client.get_random_instrumental_track(workdir)
