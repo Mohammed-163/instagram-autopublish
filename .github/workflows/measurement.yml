@@ -60,7 +60,7 @@ jobs:
           SUPABASE_SECRET_KEY:               ${{ secrets.SUPABASE_SECRET_KEY }}
           DRY_RUN:                           ${{ github.event.inputs.dry_run || 'false' }}
           FORCE_VIDEO_MODE_TEST:             ${{ github.event.inputs.force_video_mode == 'true' && 'true' || '' }}
-        run: python phase5_6/scripts/daily_generate.py
+        run: python phase5_6/scripts/daily_generate.py ${{ github.event.inputs.dry_run == 'true' && '--dry-run' || '' }}
       - name: Test Pixabay Video API
         if: ${{ inputs.test_pixabay_video == true }}
         env:
