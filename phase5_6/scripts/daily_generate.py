@@ -222,7 +222,9 @@ def main():
                         final_pixabay_query = content["pixabay_query"]
                         if visual_mood:
                             final_pixabay_query = f"{content['pixabay_query']} {visual_mood}"
-                        if config.PIXABAY_VIDEO_MODE:
+                        effective_video_mode = config.PIXABAY_VIDEO_MODE or os.environ.get("FORCE_VIDEO_MODE_TEST") == "true"
+
+                        if effective_video_mode:
                             video_path = _fetch_vetted_video(
                                 pixabay, gemini, final_pixabay_query, topic_summary, tmpdir,
                             )
