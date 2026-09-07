@@ -221,7 +221,7 @@ class VideoCreator:
             f"[0:v]scale={config.VIDEO_WIDTH}:{config.VIDEO_HEIGHT}:force_original_aspect_ratio=increase,"
             f"crop={config.VIDEO_WIDTH}:{config.VIDEO_HEIGHT}[bg];"
             f"[1:v]fade=in:st=0:d=0.8:alpha=1[hook_faded];"
-            f"[2:v]fade=in:st=1.5:d=0.8:alpha=1[rest_faded];"
+            f"[2:v]fade=in:st=0.5:d=0.8:alpha=1[rest_faded];"
             f"[bg][hook_faded]overlay=0:0[v1];"
             f"[v1][rest_faded]overlay=0:0[vout]"
         )
