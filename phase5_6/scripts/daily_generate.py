@@ -241,10 +241,40 @@ def main():
                             )
                             is_video_background = False
 
-                    video_path = video_creator.build_post_video(
-                        bg_path, content["hook_line"], content["fact_line"], content["cta_line"],
-                        tmpdir, f"post_{date_str}_{i}.mp4",
-                    )
+                    output_filename = f"post_{date_str}_{i}.mp4"
+
+                    if is_video_background:
+                        try:
+                            video_path = video_creator.build_post_video_from_video_bg(
+                                bg_path,
+                                content["hook_line"],
+                                content["fact_line"],
+                                content["cta_line"],
+                                tmpdir,
+                                output_filename,
+                            )
+                        except Exception as exc:
+                            print(f"⚠️ Video-background pipeline failed ({exc}), falling back to static image pipeline")
+                            fallback_bg_path = _fetch_vetted_background(
+                                pixabay, gemini, final_pixabay_query, topic_summary, tmpdir,
+                            )
+                            video_path = video_creator.build_post_video(
+                                fallback_bg_path,
+                                content["hook_line"],
+                                content["fact_line"],
+                                content["cta_line"],
+                                tmpdir,
+                                output_filename,
+                            )
+                    else:
+                        video_path = video_creator.build_post_video(
+                            bg_path,
+                            content["hook_line"],
+                            content["fact_line"],
+                            content["cta_line"],
+                            tmpdir,
+                            output_filename,
+                        )
 
                     drive_file_id = drive.upload_video(video_path, os.path.basename(video_path), month_folder_id)
                     drive.make_public(drive_file_id)
