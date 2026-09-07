@@ -160,7 +160,6 @@ def main():
 
         if args.dry_run:
             print(f"[DRY RUN] Would generate {post_count} post(s) for {date_str}")
-            return
 
         drive = DriveClient(config.load_drive_oauth_token_json(), config.require_env("GOOGLE_DRIVE_FOLDER_ID"))
         month_folder_id = drive.get_or_create_month_folder(month_label)
@@ -278,8 +277,18 @@ def main():
                             output_filename,
                         )
 
-                    drive_file_id = drive.upload_video(video_path, os.path.basename(video_path), month_folder_id)
+                    drive_file_id = drive.upload_video(
+                        video_path,
+                        os.path.basename(video_path),
+                        month_folder_id,
+                    )
                     drive.make_public(drive_file_id)
+
+                    if args.dry_run:
+                        print(f"[DRY RUN] Video built and uploaded for preview. Drive file ID: {drive_file_id} (is_video_background={is_video_background})")
+                        print(f"[DRY RUN] Skipping Sheets logging for post {i}")
+                        generated += 1
+                        continue
 
                 scheduled_time_hhmm = (plan.get(f"post_{i}_time") if plan else None) or now.strftime("%H:%M")
                 # post_N_time from the monthly plan is Baghdad-local (best audience
