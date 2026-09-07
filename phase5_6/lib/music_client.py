@@ -59,10 +59,12 @@ def get_random_instrumental_track(workdir: str, timeout: int = 15) -> Optional[s
         resp.raise_for_status()
         data = resp.json()
         if not data.get("ok"):
+            print(f"[music_client] API returned ok=False for query '{query}'")
             return None
 
         candidates = [t for t in data.get("data", []) if _track_is_safe(t)]
         if not candidates:
+            print(f"[music_client] No safe candidates found for query '{query}' (total results: {len(data.get('data', []))})")
             return None
 
         track = random.choice(candidates)
@@ -77,5 +79,7 @@ def get_random_instrumental_track(workdir: str, timeout: int = 15) -> Optional[s
 
         return output_path
 
-    except Exception:
+    except Exception as exc:
+        print(f"[music_client] Failed: {exc}")
         return None
+
