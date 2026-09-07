@@ -13,6 +13,7 @@ import subprocess
 from PIL import Image, ImageDraw, ImageFont
 
 from . import config
+from . import music_client
 
 
 def _hex_to_rgb(hex_color: str) -> tuple:
@@ -143,3 +144,115 @@ class VideoCreator:
                 os.remove(path)
 
         return video_path
+
+    def _get_video_resolution(self, video_path: str) -> tuple:
+        """يرجع (width, height) للفيديو عبر ffprobe. يرمي استثناء عند الفشل."""
+        cmd = [
+            "ffprobe", "-v", "error",
+            "-select_streams", "v:0",
+            "-show_entries", "stream=width,height",
+            "-of", "csv=s=x:p=0",
+            video_path,
+        ]
+        result = subprocess.run(cmd, capture_output=True, text=True)
+        if result.returncode != 0:
+            raise RuntimeError(f"ffprobe failed: {result.stderr}")
+        w_str, h_str = result.stdout.strip().split("x")
+        return int(w_str), int(h_str)
+
+    def create_transparent_text_layer(self, lines: list, font_sizes: list, colors: list, output_path: str) -> str:
+        """
+        يرسم مجموعة أسطر نصية على خلفية شفافة بالكامل (بدون overlay داكن وبدون خلفية صورة).
+        lines / font_sizes / colors يجب أن تكون بنفس الطول، وتُرسم بالتتابع من نفس نقطة البداية
+        العمودية المستخدمة في create_image لضمان تطابق موضع النص بصرياً بين المسارين.
+        """
+        img = Image.new("RGBA", (config.VIDEO_WIDTH, config.VIDEO_HEIGHT), (0, 0, 0, 0))
+        draw = ImageDraw.Draw(img)
+
+        y = int(config.VIDEO_HEIGHT * 0.32)
+        for text, size, color in zip(lines, font_sizes, colors):
+            if not text:
+                continue
+            font = ImageFont.truetype(self.font_path, size)
+            y = self._draw_centered_text(draw, text, font, color, y, config.VIDEO_WIDTH)
+
+        img.save(output_path, "PNG")
+        return output_path
+
+    def build_post_video_from_video_bg(self, video_bg_path: str, hook: str, fact: str, cta: str,
+                                        workdir: str, output_filename: str) -> str:
+        """
+        مسار بديل كامل: خلفية فيديو خام حقيقية بدل صورة ثابتة، مع طبقتي نص متلاشيتين
+        (الهوك أولاً، ثم fact+cta معاً) وموسيقى حقيقية بدل anullsrc.
+        يرمي استثناء عند أي مشكلة تقنية (دقة غير كافية، فشل ffmpeg) ليتراجع المستدعي
+        تلقائياً لمسار الصور القديم (fail-open على مستوى daily_generate.py).
+        """
+        width, height = self._get_video_resolution(video_bg_path)
+        if height < config.MIN_VIDEO_HEIGHT_FOR_PUBLISH:
+            raise RuntimeError(
+                f"Video background resolution too low: {width}x{height}, "
+                f"minimum height required is {config.MIN_VIDEO_HEIGHT_FOR_PUBLISH}"
+            )
+
+        hook_overlay_path = os.path.join(workdir, "hook_overlay.png")
+        rest_overlay_path = os.path.join(workdir, "rest_overlay.png")
+        output_path = os.path.join(workdir, output_filename)
+
+        self.create_transparent_text_layer(
+            lines=[hook],
+            font_sizes=[config.FONT_SIZE_HOOK],
+            colors=[config.COLOR_HOOK],
+            output_path=hook_overlay_path,
+        )
+        self.create_transparent_text_layer(
+            lines=[fact, cta],
+            font_sizes=[config.FONT_SIZE_FACT, config.FONT_SIZE_CTA],
+            colors=[config.COLOR_FACT, config.COLOR_CTA],
+            output_path=rest_overlay_path,
+        )
+
+        music_path = music_client.get_random_instrumental_track(workdir)
+
+        filter_complex = (
+            f"[0:v]scale={config.VIDEO_WIDTH}:{config.VIDEO_HEIGHT}:force_original_aspect_ratio=increase,"
+            f"crop={config.VIDEO_WIDTH}:{config.VIDEO_HEIGHT}[bg];"
+            f"[1:v]fade=in:st=0:d=0.8:alpha=1[hook_faded];"
+            f"[2:v]fade=in:st=1.5:d=0.8:alpha=1[rest_faded];"
+            f"[bg][hook_faded]overlay=0:0[v1];"
+            f"[v1][rest_faded]overlay=0:0[vout]"
+        )
+
+        cmd = [
+            "ffmpeg", "-y",
+            "-i", video_bg_path,
+            "-loop", "1", "-i", hook_overlay_path,
+            "-loop", "1", "-i", rest_overlay_path,
+        ]
+
+        if music_path:
+            cmd += ["-i", music_path]
+        else:
+            cmd += ["-f", "lavfi", "-i", "anullsrc=r=44100:cl=stereo"]
+
+        cmd += [
+            "-filter_complex", filter_complex,
+            "-map", "[vout]",
+            "-map", "3:a",
+            "-c:v", "libx264",
+            "-pix_fmt", "yuv420p",
+            "-c:a", "aac",
+            "-t", str(config.VIDEO_DURATION_SECONDS),
+            "-shortest",
+            output_path,
+        ]
+
+        result = subprocess.run(cmd, capture_output=True, text=True)
+
+        for path in (hook_overlay_path, rest_overlay_path, music_path, video_bg_path):
+            if path and os.path.exists(path):
+                os.remove(path)
+
+        if result.returncode != 0:
+            raise RuntimeError(f"ffmpeg failed (video bg pipeline): {result.stderr}")
+
+        return output_path
