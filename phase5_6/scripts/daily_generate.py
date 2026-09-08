@@ -62,8 +62,77 @@ def _fetch_vetted_background(pixabay, gemini, pixabay_query: str, topic_summary:
     return chosen
 
 
+def _fetch_vetted_video(
+    pixabay, gemini, pixabay_query: str, topic_summary: str, tmpdir: str
+) -> str | None:
+    """Download, review, and return an original accepted Pixabay video.
+    Falls back to config.PIXABAY_FALLBACK_KEYWORDS once if the primary query
+    yields no accepted candidate, mirroring _fetch_vetted_background's retry logic.
+    """
+    def _try_query(query: str, prefix: str) -> str | None:
+        try:
+            candidates = pixabay.download_video_candidates(
+                query, tmpdir, n=config.IMAGE_CANDIDATE_COUNT,
+                filename_prefix=prefix,
+            )
+            if not candidates:
+                return None
+
+            review_copies = []
+            for i, video_path in enumerate(candidates):
+                review_path = os.path.join(tmpdir, f"{prefix}_review_{i}.mp4")
+                try:
+                    pixabay.create_review_copy(video_path, review_path)
+                    review_copies.append(review_path)
+                except Exception as e:
+                    print(f"⚠️ Failed to create review copy for {video_path}: {e}")
+                    continue
+
+            if not review_copies:
+                return None
+
+            selected_review = gemini.select_best_video(review_copies, topic_summary)
+            if selected_review is None:
+                return None
+
+            idx = review_copies.index(selected_review)
+            return candidates[idx]
+        except Exception as e:
+            print(f"⚠️ Video pipeline failed for query '{query}': {e}")
+            return None
+
+    result = _try_query(pixabay_query, "bg_video_candidate")
+    if result is not None:
+        return result
+
+    print("⚠️ No suitable video among primary candidates — trying fallback keywords once.")
+    return _try_query(config.PIXABAY_FALLBACK_KEYWORDS, "bg_video_fallback")
+
+
 def today_baghdad() -> datetime:
     return datetime.now(pytz.timezone(config.BAGHDAD_TZ))
+
+
+def _get_today_theme_from_weekly_plan(now: datetime) -> tuple[str | None, str | None]:
+    """Read today's theme from the active weekly plan, failing open safely."""
+    try:
+        from core.container import container
+
+        planning_service = container.resolve("weekly_planning_service")
+        active_plan = planning_service.get_active_plan()
+        if active_plan is None:
+            return None, None
+        plan_data = active_plan.plan
+        if not isinstance(plan_data, dict) or "days" not in plan_data:
+            return None, None
+        day_name = now.strftime("%A").lower()
+        day_data = plan_data["days"].get(day_name)
+        if not isinstance(day_data, dict):
+            return None, None
+        return day_data.get("day_theme"), day_data.get("visual_mood")
+    except Exception as e:
+        print(f"⚠️ Failed to read weekly plan theme, continuing without it: {e}")
+        return None, None
 
 
 def main():
@@ -82,6 +151,7 @@ def main():
             return
 
         now = today_baghdad()
+        day_theme, visual_mood = _get_today_theme_from_weekly_plan(now)
         date_str = now.strftime("%Y-%m-%d")
         month_label = now.strftime("%Y-%m")
 
@@ -102,7 +172,6 @@ def main():
 
         if args.dry_run:
             print(f"[DRY RUN] Would generate {post_count} post(s) for {date_str}")
-            return
 
         drive = DriveClient(config.load_drive_oauth_token_json(), config.require_env("GOOGLE_DRIVE_FOLDER_ID"))
         month_folder_id = drive.get_or_create_month_folder(month_label)
@@ -113,7 +182,9 @@ def main():
                 recent_topics = sheets.get_recent_topics()
 
                 # ── Step 5: Generate core content ──────────────────────────
-                content = gemini.generate_post_content(recent_topics)
+                content = gemini.generate_post_content(
+                    recent_topics, day_theme=day_theme, visual_mood=visual_mood,
+                )
 
                 # ── Step 5b: Generate caption + hashtags ────────────────────
                 # generate_post_content does NOT produce caption_arabic or
@@ -152,23 +223,84 @@ def main():
                 bg_file_id = (plan or {}).get(f"post_{i}_bg_file_id")
                 with tempfile.TemporaryDirectory() as tmpdir:
                     bg_path = os.path.join(tmpdir, "bg.jpg")
+                    is_video_background = False
                     if bg_file_id:
                         # Pre-selected asset from the monthly plan is assumed
                         # already vetted (manually placed) — download as-is.
                         drive.download_file(bg_file_id, bg_path)
                     else:
                         topic_summary = f"{content['hook_line']} — {content['fact_line']}"
-                        bg_path = _fetch_vetted_background(
-                            pixabay, gemini, content["pixabay_query"], topic_summary, tmpdir,
+                        final_pixabay_query = content["pixabay_query"]
+                        if visual_mood:
+                            final_pixabay_query = f"{content['pixabay_query']} {visual_mood}"
+                        effective_video_mode = config.PIXABAY_VIDEO_MODE or os.environ.get("FORCE_VIDEO_MODE_TEST") == "true"
+
+                        if effective_video_mode:
+                            video_path = _fetch_vetted_video(
+                                pixabay, gemini, final_pixabay_query, topic_summary, tmpdir,
+                            )
+                            if video_path is not None:
+                                bg_path = video_path
+                                is_video_background = True
+                            else:
+                                print("⚠️ No acceptable video found, falling back to image path")
+                                bg_path = _fetch_vetted_background(
+                                    pixabay, gemini, final_pixabay_query, topic_summary, tmpdir,
+                                )
+                                is_video_background = False
+                        else:
+                            bg_path = _fetch_vetted_background(
+                                pixabay, gemini, final_pixabay_query, topic_summary, tmpdir,
+                            )
+                            is_video_background = False
+
+                    output_filename = f"post_{date_str}_{i}.mp4"
+
+                    if is_video_background:
+                        try:
+                            video_path = video_creator.build_post_video_from_video_bg(
+                                bg_path,
+                                content["hook_line"],
+                                content["fact_line"],
+                                content["cta_line"],
+                                tmpdir,
+                                output_filename,
+                            )
+                        except Exception as exc:
+                            print(f"⚠️ Video-background pipeline failed ({exc}), falling back to static image pipeline")
+                            fallback_bg_path = _fetch_vetted_background(
+                                pixabay, gemini, final_pixabay_query, topic_summary, tmpdir,
+                            )
+                            video_path = video_creator.build_post_video(
+                                fallback_bg_path,
+                                content["hook_line"],
+                                content["fact_line"],
+                                content["cta_line"],
+                                tmpdir,
+                                output_filename,
+                            )
+                    else:
+                        video_path = video_creator.build_post_video(
+                            bg_path,
+                            content["hook_line"],
+                            content["fact_line"],
+                            content["cta_line"],
+                            tmpdir,
+                            output_filename,
                         )
 
-                    video_path = video_creator.build_post_video(
-                        bg_path, content["hook_line"], content["fact_line"], content["cta_line"],
-                        tmpdir, f"post_{date_str}_{i}.mp4",
+                    drive_file_id = drive.upload_video(
+                        video_path,
+                        os.path.basename(video_path),
+                        month_folder_id,
                     )
-
-                    drive_file_id = drive.upload_video(video_path, os.path.basename(video_path), month_folder_id)
                     drive.make_public(drive_file_id)
+
+                    if args.dry_run:
+                        print(f"[DRY RUN] Video built and uploaded for preview. Drive file ID: {drive_file_id} (is_video_background={is_video_background})")
+                        print(f"[DRY RUN] Skipping Sheets logging for post {i}")
+                        generated += 1
+                        continue
 
                 scheduled_time_hhmm = (plan.get(f"post_{i}_time") if plan else None) or now.strftime("%H:%M")
                 # post_N_time from the monthly plan is Baghdad-local (best audience
