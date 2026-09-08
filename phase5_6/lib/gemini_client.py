@@ -73,12 +73,25 @@ class GeminiClient:
     # ------------------------------------------------------------------
     # Content generation
     # ------------------------------------------------------------------
-    def generate_post_content(self, recent_topics: list, post_type: str = "quick_psychological_fact") -> dict:
+    def generate_post_content(
+        self,
+        recent_topics: list,
+        post_type: str = "quick_psychological_fact",
+        day_theme: str | None = None,
+        visual_mood: str | None = None,
+    ) -> dict:
         avoid_list = ", ".join(recent_topics) if recent_topics else "(لا يوجد سجل سابق بعد)"
+        day_context = ""
+        if day_theme is not None or visual_mood is not None:
+            day_context = (
+                f"\nوجّه المحتوى ليتماشى مع موضوع اليوم المخطط له: {day_theme} "
+                f"(بنبرة بصرية: {visual_mood}).\n"
+            )
 
         prompt = f"""أنت كاتب محتوى متخصص بـ"حقائق نفسية سريعة" لمنشورات انستغرام قصيرة (فئة: {post_type}).
 
 مواضيع نُشرت مسبقاً ويجب تجنب تكرارها: {avoid_list}
+{day_context}
 
 الملطوب: حقيقة نفسية واحدة، مثبتة علمياً وموثوقة فعلاً (وليست خرافة شائعة أو معلومة غير مؤكدة).
 إذا لم تكن متأكداً 100% من صحة معلومة معينة علمياً، اختر موضوعاً نفسياً آخر تكون واثقاً منه بدلاً منها.
@@ -87,7 +100,11 @@ class GeminiClient:
 التزم بميزانية الكلمات التالية بدقة:
 - hook_line: 4-6 كلمات (جملة تلفت الانتباه، سؤال أو صدمة قصيرة)
 - fact_line: 8-12 كلمة (الحقيقة نفسها بوضوح تام)
-- cta_line: 3-5 كلمات (دعوة للحفظ أو المشاركة)
+- cta_line: 3-5 كلمات. يجب أن تكون دعوة فعلية ومحددة للحفظ، تربط الفائدة مباشرة
+  بمحتوى fact_line نفسه (مثال على الأسلوب المطلوب: "احفظه قبل أن تنساه،"
+  "احفظه لتطبّقه لاحقاً،" "شارك من يحتاجه الآن"). ممنوع استخدام صيغ عامة غامضة
+  لا ترتبط بمضمون الحقيقة نفسها (مثل "احفظ المقطع للهدوء السريع" أو
+  "احفظه لوقت لاحق" بدون سبب واضح).
 
 أخرج الناتج بصيغة JSON فقط، بدون أي نص أو تنسيق إضافي قبله أو بعده، بالضبط بهذا الشكل:
 {{
@@ -151,6 +168,54 @@ class GeminiClient:
 }}"""
         raw = self._call_with_fallback(prompt)
         return self._extract_json(raw)
+
+    def build_weekly_plan(self, weekly_summary: dict) -> dict:
+        prompt = f"""أنت مستشار استراتيجي لمنصة انستغرام متخصصة بالمحتوى النفسي.
+خلاصة أداء الأسبوع الماضي:
+{weekly_summary}
+
+أنشئ خطة محتوى يومية مفصلة للأسبوع القادم. إذا كانت الخلاصة فارغة فأنشئ خطة ابتدائية معقولة.
+أخرج JSON فقط:
+{{
+  "strategy_summary": "ملخص عام قصير للاستراتيجية هذا الأسبوع",
+  "days": {{
+    "sunday": {{"day_theme": "...", "visual_mood": "...", "post_count_target": 1}},
+    "monday": {{"day_theme": "...", "visual_mood": "...", "post_count_target": 1}},
+    "tuesday": {{"day_theme": "...", "visual_mood": "...", "post_count_target": 1}},
+    "wednesday": {{"day_theme": "...", "visual_mood": "...", "post_count_target": 1}},
+    "thursday": {{"day_theme": "...", "visual_mood": "...", "post_count_target": 1}},
+    "friday": {{"day_theme": "...", "visual_mood": "...", "post_count_target": 1}},
+    "saturday": {{"day_theme": "...", "visual_mood": "...", "post_count_target": 1}}
+  }},
+  "avoid_themes": ["موضوع أو نمط بصري يجب تجنبه هذا الأسبوع"]
+}}"""
+        required = [
+            "strategy_summary",
+            "days",
+            "avoid_themes",
+        ]
+        expected_days = {
+            "sunday", "monday", "tuesday", "wednesday",
+            "thursday", "friday", "saturday",
+        }
+        required_day_fields = {"day_theme", "visual_mood", "post_count_target"}
+        for attempt in range(3):
+            raw = self._call_with_fallback(prompt)
+            try:
+                data = self._extract_json(raw)
+                if not all(key in data for key in required):
+                    continue
+                days = data["days"]
+                if set(days) != expected_days or any(
+                    not isinstance(days[day], dict)
+                    or not required_day_fields.issubset(days[day])
+                    for day in expected_days
+                ):
+                    continue
+                return data
+            except (json.JSONDecodeError, ValueError):
+                continue
+        raise ValueError("Failed to generate valid weekly plan after 3 attempts")
 
     def diagnose_workflow_error(self, error_log: str) -> str:
         prompt = f"""أنت مهندس DevOps خبير. حلل هذا الخطأ واقترح الإصلاح:
@@ -272,4 +337,57 @@ class GeminiClient:
             return image_paths[idx]
 
         # Gemini returned an out-of-range index — treat as rejection.
+        return None
+
+    def select_best_video(self, video_paths: list, topic: str) -> str | None:
+        """Vet candidate MP4 videos via Gemini and return the best acceptable path."""
+        if not video_paths:
+            return None
+
+        try:
+            from google import genai
+            from google.genai import types as genai_types
+        except Exception as exc:
+            print(f"⚠️ Gemini video vetting failed, likely unsupported input: {exc}")
+            return None
+
+        api_key = self._engine.image_check_key
+        if not api_key:
+            available = [k for k in self._engine.api_keys if k]
+            if not available:
+                print("⚠️ Gemini video vetting failed: no Gemini API key available")
+                return None
+            api_key = available[0]
+
+        for path in video_paths:
+            try:
+                with open(path, "rb") as fh:
+                    video_bytes = fh.read()
+                parts = [
+                    genai_types.Part.from_bytes(data=video_bytes, mime_type="video/mp4"),
+                    genai_types.Part.from_text(text=(
+                        f'هل هذا الفيديو مناسب كخلفية لمنشور عن: "{topic}"؟ '
+                        "تحقق من الملاءمة البصرية للموضوع وخلوه من العري، الكحول، "
+                        "السجائر، العنف، الدم، الجرائم، الرموز الدينية غير المحايدة، "
+                        "وأي محتوى غير لائق آخر. أخرج JSON فقط: "
+                        '{"accepted": true/false, "reason": "..."}'
+                    )),
+                ]
+                client = genai.Client(api_key=api_key)
+                resp = client.models.generate_content(
+                    model=config.IMAGE_VETTING_MODEL,
+                    contents=parts,
+                )
+                raw = resp.text
+                if raw is None:
+                    raise ValueError("empty response")
+                result = self._extract_json(raw)
+                if result.get("accepted") is True:
+                    return path
+                else:
+                    print(f"⚠️ Gemini rejected video candidate {path!r}: {result.get('reason', 'no reason given')}")
+            except Exception as exc:
+                print(f"⚠️ Gemini video vetting failed for {path!r}: {exc}")
+                continue
+
         return None
