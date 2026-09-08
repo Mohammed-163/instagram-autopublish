@@ -70,6 +70,7 @@ def _fetch_vetted_video(
     yields no accepted candidate, mirroring _fetch_vetted_background's retry logic.
     """
     def _try_query(query: str, prefix: str) -> str | None:
+        print(f"[DIAG] _try_query called with query='{query}' prefix='{prefix}'")
         try:
             candidates = pixabay.download_video_candidates(
                 query, tmpdir, n=config.IMAGE_CANDIDATE_COUNT,
