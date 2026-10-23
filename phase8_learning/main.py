@@ -1,0 +1,52 @@
+"""
+Minimal entrypoint for the Learning Layer.
+
+Demonstrates the flow:
+
+    ObservationRecorded
+        v
+    LearningEngine
+        v
+    LearningService
+        v
+    Repository
+
+No HTTP. No queues. No sample or fake data lives in this module — it is
+meant to be imported and called by a real caller that already owns a
+stream of ObservationRecorded events produced by the upstream Observation
+layer.
+"""
+
+from __future__ import annotations
+
+from typing import Iterable, List, Optional
+
+from phase8_learning.config.settings import Settings
+from phase8_learning.domain.knowledge import Knowledge
+from phase8_learning.events.events import ObservationRecorded
+from phase8_learning.infrastructure.container import Container
+
+
+def run(
+    observations: Iterable[ObservationRecorded],
+    settings: Optional[Settings] = None,
+) -> List[Knowledge]:
+    """
+    Run one batch of ObservationRecorded events through the full
+    Engine -> Service -> Repository pipeline and return the Knowledge
+    objects that were created or updated.
+    """
+    container = Container(settings=settings)
+    container.initialize_schema()
+
+    stack = container.build_stack()
+    try:
+        candidates = stack.engine.process(observations)
+        results = stack.service.process_candidates(list(candidates))
+        stack.unit_of_work.commit()
+        return results
+    except Exception:
+        stack.unit_of_work.rollback()
+        raise
+    finally:
+        stack.unit_of_work.__exit__(None, None, None)
