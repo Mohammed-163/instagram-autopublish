@@ -120,7 +120,7 @@ def _build_rows(posts: list[dict], week_start: date) -> list[list[str]]:
         for slot_index in range(post_count):
             planned = topics[topic_index]
             verse = selected_verses[topic_index]
-            local_time = "19:00" if slot_index == 0 else "23:00"
+            local_time = "13:00" if post_count == 2 and slot_index == 0 else "18:00"
             slots.append((local_time, str(planned.get("pixabay_query") or "peaceful nature sunrise"),
                           str(planned["topic"]).strip(), str(verse["key"])))
             topic_index += 1
