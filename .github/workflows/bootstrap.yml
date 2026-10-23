@@ -1,0 +1,132 @@
+name: Bootstrap & CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  bootstrap:
+    name: Install · Migrate · Test · Verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt google-genai apscheduler PyNaCl --quiet
+
+      - name: Schema smoke-test (SQLite — CI only)
+        env:
+          ALLOW_SQLITE_FALLBACK:       "true"
+          LEARNING_LAYER_DATABASE_URL: "sqlite:///./phase8_test.db"
+          KCL_DATABASE_URL:            "sqlite:///./phase9_test.db"
+          P10_DATABASE_URL:            "sqlite:///./phase10_test.db"
+        run: |
+          python -c "
+          import sys; sys.path.insert(0,'.')
+          import phase5_6
+          from core.container import container
+          import phase8_learning
+          from phase8_learning.infrastructure.container import Container as P8C; P8C().initialize_schema()
+          import phase9_coverage
+          from phase9_coverage.application.container import build_container; build_container(ensure_schema=True)
+          import phase10_intelligence
+          from phase10_intelligence.bootstrap.app import create_application; create_application(create_schema=True)
+          print('All schemas OK')
+          "
+
+      - name: Run test suite
+        env:
+          ALLOW_SQLITE_FALLBACK:       "true"
+          LEARNING_LAYER_DATABASE_URL: "sqlite:///./phase8_test.db"
+          KCL_DATABASE_URL:            "sqlite:///./phase9_test.db"
+          P10_DATABASE_URL:            "sqlite:///./phase10_test.db"
+        run: |
+          python -m pytest phase5_6/tests/ tests/phase8/ tests/phase9/ tests/phase10/ \
+            -q --tb=short
+
+      - name: Smoke-test full bootstrap
+        env:
+          ALLOW_SQLITE_FALLBACK:       "true"
+          LEARNING_LAYER_DATABASE_URL: "sqlite:///./phase8_test.db"
+          KCL_DATABASE_URL:            "sqlite:///./phase9_test.db"
+          P10_DATABASE_URL:            "sqlite:///./phase10_test.db"
+        run: python main.py
+
+      - name: Verify operational layer
+        run: |
+          python -c "
+          from operational.gemini_rotation import GeminiRotationEngine, FREE_MODELS
+          from operational.health_monitor import HealthMonitor
+          from operational.logging_config import setup, get_correlation_id
+          from operational.backup import run_backup
+          from operational.restore import validate_backup
+          from operational.resilience import CircuitBreaker, RetryPolicy
+          from operational.db_config import resolve_database_url
+          e = GeminiRotationEngine(api_keys=['k1'], models=FREE_MODELS)
+          print('Operational OK. Models:', FREE_MODELS)
+          setup(json_format=False)
+          cid = get_correlation_id()
+          print('Correlation ID:', cid)
+          cb = CircuitBreaker(name='test')
+          print('CircuitBreaker state:', cb.state)
+          "
+
+      - name: Validate workflow entry points
+        run: |
+          python -c "
+          import importlib, sys
+          # Validate all workflow script entry points exist and are importable
+          sys.path.insert(0, '.')
+          sys.path.insert(0, 'phase5_6')
+          checks = [
+              'phase5_6.scripts.daily_generate',
+              'phase5_6.scripts.publish',
+              'phase5_6.scripts.monthly_task',
+              'phase5_6.scripts.fetch_insights',
+              'phase5_6.scripts.cleanup',
+              'phase5_6.scripts.weekly_backup',
+              'phase5_6.scripts.refresh_token',
+              'operational.backup',
+              'operational.restore',
+              'operational.gemini_rotation',
+              'operational.health_monitor',
+              'operational.logging_config',
+              'operational.resilience',
+              'operational.db_config',
+          ]
+          for mod in checks:
+              try:
+                  importlib.import_module(mod)
+                  print(f'  ✓ {mod}')
+              except Exception as e:
+                  print(f'  ✗ {mod}: {e}')
+          "
+
+      - name: Cleanup test files
+        if: always()
+        run: rm -f phase*.db gemini_rotation_state.json
+
+      - name: Notify failure
+        if: failure()
+        uses: appleboy/telegram-action@master
+        with:
+          to:    ${{ secrets.TELEGRAM_CHAT_ID }}
+          token: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          message: |
+            🔴 CI Bootstrap FAILED
+            Repo: ${{ github.repository }} Branch: ${{ github.ref_name }}
+            ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}

@@ -1,0 +1,45 @@
+name: Execution — Publish to Instagram
+
+on:
+  schedule:
+    - cron: "*/15 * * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: publish
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: Publish due posts
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.11", cache: pip}
+      - run: pip install -r requirements.txt --quiet
+
+      - name: Run publish.py
+        env:
+          GOOGLE_SHEET_ID:                 ${{ secrets.GOOGLE_SHEET_ID }}
+          GOOGLE_DRIVE_FOLDER_ID:          ${{ secrets.GOOGLE_DRIVE_FOLDER_ID }}
+          GOOGLE_SERVICE_ACCOUNT_JSON_B64: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON_B64 }}
+          GOOGLE_OAUTH_TOKEN_JSON_B64:     ${{ secrets.GOOGLE_OAUTH_TOKEN_JSON_B64 }}
+          IG_ACCESS_TOKEN:                 ${{ secrets.IG_ACCESS_TOKEN }}
+          IG_BUSINESS_ID:                  ${{ secrets.IG_BUSINESS_ID }}
+          GEMINI_API_KEY_1:                ${{ secrets.GEMINI_API_KEY_1 }}
+          TELEGRAM_BOT_TOKEN:              ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID:                ${{ secrets.TELEGRAM_CHAT_ID }}
+          GH_PAT:                          ${{ secrets.GH_PAT }}
+          GH_REPO:                         ${{ github.repository }}
+        run: python phase5_6/scripts/publish.py
+
+      - name: Notify failure
+        if: failure()
+        uses: appleboy/telegram-action@master
+        with:
+          to: ${{ secrets.TELEGRAM_CHAT_ID }}
+          token: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          message: "🔴 Publish FAILED\n${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"

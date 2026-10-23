@@ -1,0 +1,41 @@
+name: Strategy — Weekly Content Planning
+
+on:
+  schedule:
+    - cron: "0 22 * * 6"   # 01:00 Sunday in Asia/Baghdad
+  workflow_dispatch:
+
+concurrency:
+  group: strategy
+  cancel-in-progress: false
+
+jobs:
+  strategy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.11", cache: pip}
+      - run: pip install -r requirements.txt google-genai --quiet
+      - name: Generate weekly plan from Supabase learning data
+        env:
+          GOOGLE_SHEET_ID:                 ${{ secrets.GOOGLE_SHEET_ID }}
+          GOOGLE_SERVICE_ACCOUNT_JSON_B64: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON_B64 }}
+          GEMINI_API_KEY_1:                ${{ secrets.GEMINI_API_KEY_1 }}
+          GEMINI_API_KEY_2:                ${{ secrets.GEMINI_API_KEY_2 }}
+          GEMINI_API_KEY_3:                ${{ secrets.GEMINI_API_KEY_3 }}
+          DATABASE_URL:                   ${{ secrets.DATABASE_URL }}
+          SUPABASE_URL:                    ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SECRET_KEY:             ${{ secrets.SUPABASE_SECRET_KEY }}
+          LEARNING_LAYER_DATABASE_URL:     ${{ secrets.DATABASE_URL }}
+          TELEGRAM_BOT_TOKEN:              ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID:                ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: python phase5_6/scripts/monthly_task.py
+      - name: Notify failure
+        if: failure()
+        uses: appleboy/telegram-action@master
+        with:
+          to: ${{ secrets.TELEGRAM_CHAT_ID }}
+          token: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          message: "🔴 Weekly Strategy FAILED\n${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
