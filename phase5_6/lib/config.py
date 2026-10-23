@@ -227,10 +227,10 @@ REQUIRED_IG_PERMISSION = "instagram_content_publish"
 # does NOT change DEFAULT_TEXT_MODEL, IMAGE_VETTING_MODEL, or LEARNING_MODEL.
 #
 # Default values:
-#   DEFAULT_TEXT_MODEL=gemini-3.5-flash-lite
+#   DEFAULT_TEXT_MODEL=gemini-3.8-flash
 #   IMAGE_VETTING_MODEL=gemini-3.5-flash-lite
-#   LEARNING_MODEL=gemini-3.5-flash
-#   ROTATION_MODELS=gemini-3.1-flash-lite,gemini-3.5-flash-lite,gemini-3.5-flash,gemini-3.6-flash
+#   LEARNING_MODEL=gemini-3.8-flash
+#   ROTATION_MODELS=gemini-3.8-flash,gemini-3.5-flash-lite,gemini-3.1-flash-lite
 # ---------------------------------------------------------------------------
 import sys as _sys, os as _os
 _sys.path.insert(0, _os.path.dirname(_os.path.dirname(_os.path.dirname(_os.path.abspath(__file__)))))
@@ -263,7 +263,7 @@ GEMINI_MODEL_ROTATION: list = ROTATION_MODELS
 # DEFAULT_TEXT_MODEL — general text generation
 # ---------------------------------------------------------------------------
 # Must be set independently; NEVER derived from ROTATION_MODELS.
-DEFAULT_TEXT_MODEL: str = _os.environ.get("DEFAULT_TEXT_MODEL", "gemini-3.5-flash-lite")
+DEFAULT_TEXT_MODEL: str = _os.environ.get("DEFAULT_TEXT_MODEL", "gemini-3.8-flash")
 
 # Legacy alias — kept so existing callers that reference GEMINI_MODEL_NAME
 # continue to work without modification.
@@ -282,7 +282,7 @@ IMAGE_VETTING_MODEL_NAME: str = IMAGE_VETTING_MODEL
 # ---------------------------------------------------------------------------
 # LEARNING_MODEL — learning layer / analysis tasks
 # ---------------------------------------------------------------------------
-LEARNING_MODEL: str = _os.environ.get("LEARNING_MODEL", "gemini-3.5-flash")
+LEARNING_MODEL: str = _os.environ.get("LEARNING_MODEL", "gemini-3.8-flash")
 
 GEMINI_MAX_TOPIC_RETRIES = 2
 
