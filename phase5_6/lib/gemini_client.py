@@ -144,17 +144,21 @@ class GeminiClient:
 شروح استُخدمت هذا الأسبوع ويجب تجنب تكرار معناها وصياغتها:
 {recent or '(لا توجد شروح سابقة هذا الأسبوع)'}
 
-اكتب شرحاً قصيراً جداً (جملة عراقية واحدة، 8 إلى 16 كلمة) يشرح معنى الآية بلطف،
-من دون ادعاء أنها وعد دنيوي مضمون، ومن دون اختلاق تفسير أو حكم شرعي.
-اكتب جملة افتتاحية عراقية قصيرة، ودعوة تفاعل لطيفة غير ملحّة، وتعليقاً قصيراً.
-لا تكتب نص الآية في حقولك؛ سيُضاف النص الأصلي من المصدر بعد التوليد.
+اكتب منشوراً بأسلوب وجداني قريب من الأمثلة: تمهيد/خطاف قصير يسبق الآية،
+ثم شرح عراقي طبيعي ومؤثر (25 إلى 55 كلمة) يربط معنى الآية بموقف حياتي ملموس.
+اكتب بلهجة عراقية سهلة مثل: أكو، شگد، مو، إلك، لا تبالغ بالفصحى ولا تجعل الشرح
+مجرد إعادة صياغة للآية. لا تدّعِ أن الآية تضمن نتيجة دنيوية محددة، ولا تختلق تفسيراً
+أو حكماً شرعياً. يجب أن يكون hook_line قصيراً (4 إلى 10 كلمات)، ويظهر قبل الآية.
+لا تكتب نص الآية في حقولك؛ سيُضاف النص الأصلي الموثوق بين الأقواس بعد التوليد.
+caption_arabic يكون المنشور كاملاً بترتيب: التمهيد، الآية، اسم السورة ورقمها، ثم الشرح.
+دعوة التفاعل والهاشتاقات تكون في التعليق فقط، ولا تدخلها داخل نص الشرح المعروض بالفيديو.
 pixabay_query يجب أن تكون 2-4 كلمات إنجليزية عن صورة فوتوغرافية هادئة مناسبة للموضوع.
 
 أخرج JSON فقط:
 {{
   "topic_slug": "english-short-slug",
-  "hook_line": "...",
-  "iraqi_explanation": "...",
+  "hook_line": "تمهيد عراقي قصير قبل الآية",
+  "iraqi_explanation": "شرح وجداني باللهجة العراقية من 25 إلى 55 كلمة",
   "cta_line": "...",
   "pixabay_query": "calm sunrise landscape",
   "caption_arabic": "...",
@@ -164,6 +168,10 @@ pixabay_query يجب أن تكون 2-4 كلمات إنجليزية عن صورة
         for _ in range(3):
             data = self._extract_json(self._call_with_fallback(prompt))
             if all(str(data.get(key, "")).strip() for key in required):
+                hook_words = len(str(data["hook_line"]).split())
+                explanation_words = len(str(data["iraqi_explanation"]).split())
+                if not 4 <= hook_words <= 10 or not 25 <= explanation_words <= 55:
+                    continue
                 data["fact_line"] = data["iraqi_explanation"]
                 return data
         raise ValueError("Gemini did not return all required hope-post fields after 3 attempts")
