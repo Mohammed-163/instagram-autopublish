@@ -250,7 +250,7 @@ def main():
 
                     output_filename = f"post_{date_str}_{i}.mp4"
                     video_path, music_filename = video_creator.build_post_video(
-                        bg_path, verse["text"], f"{verse['surah']} — الآية {verse['ayah']}",
+                        bg_path, verse["text"], f"{verse['surah']}، الآية {verse['ayah']}",
                         content["fact_line"], tmpdir, output_filename,
                     )
 
