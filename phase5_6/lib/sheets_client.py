@@ -183,7 +183,10 @@ class SheetsClient:
                 due.append((idx, row))
         return due
 
-    def get_published_for_cleanup(self, cutoff_hours: int = config.CLEANUP_DELAY_HOURS) -> list:
+    def get_published_for_cleanup(self, cutoff_hours: int | None = None) -> list:
+        # Avoid reading optional/older config values at module import time.
+        if cutoff_hours is None:
+            cutoff_hours = getattr(config, "CLEANUP_DELAY_HOURS", 0)
         ws = self._ws(config.DAILY_LOG_TAB)
         records = ws.get_all_records()
         cutoff = datetime.utcnow() - timedelta(hours=cutoff_hours)
