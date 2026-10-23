@@ -115,6 +115,18 @@ def today_baghdad() -> datetime:
     return datetime.now(pytz.timezone(config.BAGHDAD_TZ))
 
 
+def _check_required_env_vars(names: list[str]) -> None:
+    """Use config's validator when available, with a compatibility fallback."""
+    validator = getattr(config, "check_required_env_vars", None)
+    if callable(validator):
+        validator(names)
+        return
+    missing = [name for name in names if not os.environ.get(name)]
+    if missing:
+        print(f"❌ Missing environment variables: {', '.join(missing)}", file=sys.stderr)
+        raise SystemExit(1)
+
+
 def _get_today_theme_from_weekly_plan(now: datetime) -> tuple[str | None, str | None]:
     """Read today's theme from the active weekly plan, failing open safely."""
     try:
@@ -142,7 +154,7 @@ def main():
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
 
-    config.check_required_env_vars(REQUIRED_VARS)
+    _check_required_env_vars(REQUIRED_VARS)
 
     notifier = TelegramNotifier(config.require_env("TELEGRAM_BOT_TOKEN"), config.require_env("TELEGRAM_CHAT_ID"))
     sheets = SheetsClient(config.load_sheets_service_account_json(), config.require_env("GOOGLE_SHEET_ID"))
