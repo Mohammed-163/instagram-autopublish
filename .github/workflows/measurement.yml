@@ -2,11 +2,11 @@ name: Measurement — Daily Post Generation
 
 on:
   schedule:
-    - cron: "0 2 * * *"   # 05:00 Asia/Baghdad
+    - cron: "0 2 * * *"   # 05:00 Asia/Baghdad (UTC+3)
   workflow_dispatch:
     inputs:
       dry_run:
-        description: "Dry run"
+        description: "Dry run (skip IG publish)"
         required: false
         default: "false"
 
@@ -22,45 +22,30 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
-
       - uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-          cache: pip
-
+        with: {python-version: "3.11", cache: pip}
       - run: pip install -r requirements.txt google-genai --quiet
 
-      - name: Install ffmpeg and Quran font
+      - name: Install ffmpeg
         run: |
           sudo apt-get update
-          sudo apt-get install -y ffmpeg fonts-hosny-amiri
+          sudo apt-get install -y ffmpeg fonts-hosny-amiri fonts-noto-core
           sudo fc-cache -f
 
       - name: Run daily_generate.py
         env:
-          GOOGLE_SHEET_ID: ${{ secrets.GOOGLE_SHEET_ID }}
-          GOOGLE_DRIVE_FOLDER_ID: ${{ secrets.GOOGLE_DRIVE_FOLDER_ID }}
-          GOOGLE_SERVICE_ACCOUNT_JSON_B64: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON_B64 }}
-          GOOGLE_OAUTH_TOKEN_JSON_B64: ${{ secrets.GOOGLE_OAUTH_TOKEN_JSON_B64 }}
-
-          # Phase 7 وPhase 8 يستخدمان نفس قاعدة البيانات الأساسية
-          DATABASE_URL: ${{ secrets.DATABASE_URL }}
-          OBSERVATION_DB_DSN: ${{ secrets.DATABASE_URL }}
-          LEARNING_LAYER_DATABASE_URL: ${{ secrets.DATABASE_URL }}
-          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-          SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
-
-          GEMINI_API_KEY_1: ${{ secrets.GEMINI_API_KEY_1 }}
-          GEMINI_API_KEY_2: ${{ secrets.GEMINI_API_KEY_2 }}
-          GEMINI_API_KEY_3: ${{ secrets.GEMINI_API_KEY_3 }}
-          GEMINI_API_KEY_IMAGE_CHECK: ${{ secrets.GEMINI_API_KEY_IMAGE_CHECK }}
-          PIXABAY_API_KEY: ${{ secrets.PIXABAY_API_KEY }}
-
-          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-
-          DRY_RUN: ${{ github.event.inputs.dry_run || 'false' }}
-
+          GOOGLE_SHEET_ID:                   ${{ secrets.GOOGLE_SHEET_ID }}
+          GOOGLE_DRIVE_FOLDER_ID:            ${{ secrets.GOOGLE_DRIVE_FOLDER_ID }}
+          GOOGLE_SERVICE_ACCOUNT_JSON_B64:   ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON_B64 }}
+          GOOGLE_OAUTH_TOKEN_JSON_B64:       ${{ secrets.GOOGLE_OAUTH_TOKEN_JSON_B64 }}
+          GEMINI_API_KEY_1:                  ${{ secrets.GEMINI_API_KEY_1 }}
+          GEMINI_API_KEY_2:                  ${{ secrets.GEMINI_API_KEY_2 }}
+          GEMINI_API_KEY_3:                  ${{ secrets.GEMINI_API_KEY_3 }}
+          GEMINI_API_KEY_IMAGE_CHECK:        ${{ secrets.GEMINI_API_KEY_IMAGE_CHECK }}
+          PIXABAY_API_KEY:                   ${{ secrets.PIXABAY_API_KEY }}
+          TELEGRAM_BOT_TOKEN:                ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID:                  ${{ secrets.TELEGRAM_CHAT_ID }}
+          DRY_RUN:                           ${{ github.event.inputs.dry_run || 'false' }}
         run: python phase5_6/scripts/daily_generate.py
 
       - name: Notify failure
@@ -69,5 +54,4 @@ jobs:
         with:
           to: ${{ secrets.TELEGRAM_CHAT_ID }}
           token: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          message: "🔴 Measurement FAILED
-${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          message: "🔴 Measurement FAILED\n${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
