@@ -38,7 +38,7 @@ class GeminiClient:
     Drop-in replacement backed by GeminiRotationEngine.
 
     Rotation order (free-tier only):
-        Key 1 → gemini-3.1-flash-lite → gemini-3.5-flash-lite → gemini-3.5-flash → gemini-3.6-flash
+        Key 1 → gemini-3.8-flash → gemini-3.5-flash-lite → gemini-3.1-flash-lite
         Key 2 → (same model order)
         Key 3 → (same model order)
     """
@@ -49,6 +49,15 @@ class GeminiClient:
             models=FREE_MODELS,
             image_check_key=image_check_key,
         )
+
+    @staticmethod
+    def _normalize_iraqi_dialect(data: dict) -> dict:
+        """Prefer the unambiguous Iraqi word for tomorrow in generated copy."""
+        for field in ("hook_line", "iraqi_explanation", "fact_line", "cta_line", "caption_arabic"):
+            value = data.get(field)
+            if isinstance(value, str):
+                data[field] = value.replace("باكر", "باجر")
+        return data
 
     # ------------------------------------------------------------------
     # Internal helpers
@@ -144,21 +153,19 @@ class GeminiClient:
 شروح استُخدمت هذا الأسبوع ويجب تجنب تكرار معناها وصياغتها:
 {recent or '(لا توجد شروح سابقة هذا الأسبوع)'}
 
-اكتب منشوراً بأسلوب وجداني قريب من الأمثلة: تمهيد/خطاف قصير يسبق الآية،
-ثم شرح عراقي طبيعي ومؤثر (25 إلى 55 كلمة) يربط معنى الآية بموقف حياتي ملموس.
-اكتب بلهجة عراقية سهلة مثل: أكو، شگد، مو، إلك، لا تبالغ بالفصحى ولا تجعل الشرح
-مجرد إعادة صياغة للآية. لا تدّعِ أن الآية تضمن نتيجة دنيوية محددة، ولا تختلق تفسيراً
-أو حكماً شرعياً. يجب أن يكون hook_line قصيراً (4 إلى 10 كلمات)، ويظهر قبل الآية.
-لا تكتب نص الآية في حقولك؛ سيُضاف النص الأصلي الموثوق بين الأقواس بعد التوليد.
-caption_arabic يكون المنشور كاملاً بترتيب: التمهيد، الآية، اسم السورة ورقمها، ثم الشرح.
-دعوة التفاعل والهاشتاقات تكون في التعليق فقط، ولا تدخلها داخل نص الشرح المعروض بالفيديو.
+اكتب شرحاً قصيراً جداً (جملة عراقية واحدة، 8 إلى 16 كلمة) يشرح معنى الآية بلطف،
+من دون ادعاء أنها وعد دنيوي مضمون، ومن دون اختلاق تفسير أو حكم شرعي.
+اكتب باللهجة العراقية الطبيعية الواضحة، لا بالفصحى ولا بلهجة خليجية. إذا كان المقصود
+الغد فاستخدم «باجر» حصراً، ولا تستخدم «باكر» أو «غداً». راجع كل مفردة عامية قبل الإخراج.
+اكتب جملة افتتاحية عراقية قصيرة، ودعوة تفاعل لطيفة غير ملحّة، وتعليقاً قصيراً.
+لا تكتب نص الآية في حقولك؛ سيُضاف النص الأصلي من المصدر بعد التوليد.
 pixabay_query يجب أن تكون 2-4 كلمات إنجليزية عن صورة فوتوغرافية هادئة مناسبة للموضوع.
 
 أخرج JSON فقط:
 {{
   "topic_slug": "english-short-slug",
-  "hook_line": "تمهيد عراقي قصير قبل الآية",
-  "iraqi_explanation": "شرح وجداني باللهجة العراقية من 25 إلى 55 كلمة",
+  "hook_line": "...",
+  "iraqi_explanation": "...",
   "cta_line": "...",
   "pixabay_query": "calm sunrise landscape",
   "caption_arabic": "...",
@@ -168,10 +175,7 @@ pixabay_query يجب أن تكون 2-4 كلمات إنجليزية عن صورة
         for _ in range(3):
             data = self._extract_json(self._call_with_fallback(prompt))
             if all(str(data.get(key, "")).strip() for key in required):
-                hook_words = len(str(data["hook_line"]).split())
-                explanation_words = len(str(data["iraqi_explanation"]).split())
-                if not 4 <= hook_words <= 10 or not 25 <= explanation_words <= 55:
-                    continue
+                data = self._normalize_iraqi_dialect(data)
                 data["fact_line"] = data["iraqi_explanation"]
                 return data
         raise ValueError("Gemini did not return all required hope-post fields after 3 attempts")
