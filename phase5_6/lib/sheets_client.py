@@ -108,7 +108,11 @@ class SheetsClient:
             current.append_rows(aligned_rows, value_input_option="RAW")
 
     # -- Daily log --------------------------------------------------------------
-    def get_recent_topics(self, n: int = config.TOPIC_HISTORY_LOOKBACK) -> list:
+    def get_recent_topics(self, n: int | None = None) -> list:
+        # Resolve the setting when called, not while importing this module.
+        # This keeps startup safe when an older deployment config omits it.
+        if n is None:
+            n = getattr(config, "TOPIC_HISTORY_LOOKBACK", 40)
         ws = self._ws(config.DAILY_LOG_TAB)
         records = ws.get_all_records()
         return [r.get("topic_slug", "") for r in records[-n:] if r.get("topic_slug")]
