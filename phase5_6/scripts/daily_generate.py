@@ -7,7 +7,6 @@ import argparse
 import os
 import sys
 import tempfile
-import traceback
 from datetime import datetime
 
 import pytz
@@ -211,17 +210,10 @@ def main():
                 )
                 content["hook_line"] = content["hook_line"].strip()
                 content["fact_line"] = content["iraqi_explanation"].strip()
-                ayah_reference = (
-                    f"سورة {verse['surah']} | آية "
-                    f"{video_creator._arabic_digits(str(verse['ayah']))}"
+                content["caption_arabic"] = (
+                    f"{content['caption_arabic'].strip()}\n\n"
+                    f"﴿{verse['text']}﴾\n({verse['surah']}، الآية {verse['ayah']})"
                 )
-                content["caption_arabic"] = "\n\n".join(part for part in (
-                    content["hook_line"],
-                    f"﴿{verse['text']}﴾",
-                    ayah_reference,
-                    content["fact_line"],
-                    content.get("cta_line", "").strip(),
-                ) if part)
                 if explanation_is_duplicate(content["fact_line"], recent_explanations):
                     raise ValueError("تفسير الآية مكرر أو قريب جداً من شرح سابق في هذا الأسبوع؛ أعد المحاولة.")
 
@@ -258,9 +250,8 @@ def main():
 
                     output_filename = f"post_{date_str}_{i}.mp4"
                     video_path, music_filename = video_creator.build_post_video(
-                        bg_path, verse["text"], ayah_reference,
+                        bg_path, verse["text"], f"{verse['surah']} — الآية {verse['ayah']}",
                         content["fact_line"], tmpdir, output_filename,
-                        hook_line=content["hook_line"],
                     )
 
                     drive_file_id = drive.upload_video(
@@ -270,7 +261,9 @@ def main():
                     )
                     drive.make_public(drive_file_id)
 
-                scheduled_time_hhmm = plan.get(f"post_{i}_time") or ("19:00" if i == 1 else "23:00")
+                # Enforce the current policy even when the weekly sheet still
+                # contains previous 19:00/23:00 values.
+                scheduled_time_hhmm = "13:00" if post_count == 2 and i == 1 else "18:00"
                 # post_N_time from the weekly plan is Baghdad-local (best audience
                 # engagement hours). Everything else in Daily_Log (published_at,
                 # cleaned_at) is stored in UTC via datetime.utcnow(), and publish.py
@@ -331,12 +324,10 @@ def main():
         notifier.notify_success(f"تم توليد {generated}/{post_count} منشور ليوم {date_str}")
 
     except CriticalError as e:
-        print(f"❌ CriticalError in daily_generate.py: {e}", file=sys.stderr, flush=True)
-        traceback.print_exc()
         notifier.alert_critical("فشل التوليد اليومي", str(e))
         sys.exit(1)
     except RecoverableError as e:
-        print(f"⚠️ Recoverable error, will retry next run: {e}", file=sys.stderr, flush=True)
+        print(f"Recoverable error, will retry next run: {e}")
 
 
 if __name__ == "__main__":
