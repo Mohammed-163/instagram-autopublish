@@ -6,11 +6,12 @@ after its learning observations are persisted, so transient failures retry.
 from __future__ import annotations
 
 import os
+import json
 import sys
 from datetime import datetime, timedelta, timezone
 
 import requests
-from sqlalchemy import text
+from sqlalchemy import inspect, text
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
@@ -44,14 +45,17 @@ def ensure_snapshot_table(engine) -> None:
         snapshot_period TEXT NOT NULL,
         target_at TIMESTAMP WITH TIME ZONE NOT NULL,
         published_at TIMESTAMP WITH TIME ZONE NOT NULL,
+        scheduled_time TIMESTAMP WITH TIME ZONE,
         captured_at TIMESTAMP WITH TIME ZONE NOT NULL,
         topic_slug TEXT,
         hook_line TEXT,
         ayah_key TEXT,
         ayah_text TEXT,
         iraqi_explanation TEXT,
+        background_query TEXT,
         visual_style TEXT,
         music_file TEXT,
+        metrics_json TEXT,
         reach BIGINT, saved BIGINT, shares BIGINT, likes BIGINT, comments BIGINT,
         views BIGINT, total_interactions BIGINT,
         PRIMARY KEY (media_id, snapshot_period),
@@ -60,10 +64,19 @@ def ensure_snapshot_table(engine) -> None:
     """
     with engine.begin() as connection:
         connection.execute(text(ddl))
-        for name in ("reach", "saved", "shares", "likes", "comments", "views", "total_interactions"):
-            connection.execute(text(
-                f"ALTER TABLE instagram_insight_snapshots ADD COLUMN IF NOT EXISTS {name} BIGINT"
-            ))
+    columns = {column["name"] for column in inspect(engine).get_columns("instagram_insight_snapshots")}
+    additions = {
+        "scheduled_time": "TIMESTAMP WITH TIME ZONE", "background_query": "TEXT",
+        "metrics_json": "TEXT", "reach": "BIGINT", "saved": "BIGINT",
+        "shares": "BIGINT", "likes": "BIGINT", "comments": "BIGINT",
+        "views": "BIGINT", "total_interactions": "BIGINT",
+    }
+    for name, sql_type in additions.items():
+        if name not in columns:
+            with engine.begin() as connection:
+                connection.execute(text(
+                    f"ALTER TABLE instagram_insight_snapshots ADD COLUMN {name} {sql_type}"
+                ))
 
 
 def _read_snapshots(engine, media_id: str) -> dict[str, dict]:
@@ -79,10 +92,13 @@ def _save_snapshot(engine, row: dict, period: str, target_at: datetime,
     values = {
         "media_id": str(row["media_id"]), "snapshot_period": period,
         "target_at": target_at, "published_at": _parse_datetime(row["published_at"]),
+        "scheduled_time": _parse_datetime(row.get("scheduled_time")),
         "captured_at": captured_at, "topic_slug": row.get("topic_slug"),
         "hook_line": row.get("hook_line"), "ayah_key": row.get("ayah_key"),
         "ayah_text": row.get("ayah_text"), "iraqi_explanation": row.get("iraqi_explanation"),
+        "background_query": row.get("background_query"),
         "visual_style": row.get("visual_style"), "music_file": row.get("music_file"),
+        "metrics_json": json.dumps(metrics, ensure_ascii=False),
     }
     for name in ("reach", "saved", "shares", "likes", "comments", "views", "total_interactions"):
         value = metrics.get(name)
@@ -90,11 +106,11 @@ def _save_snapshot(engine, row: dict, period: str, target_at: datetime,
     with engine.begin() as connection:
         connection.execute(text("""
             INSERT INTO instagram_insight_snapshots
-            (media_id,snapshot_period,target_at,published_at,captured_at,topic_slug,hook_line,
-             ayah_key,ayah_text,iraqi_explanation,visual_style,music_file,
+            (media_id,snapshot_period,target_at,published_at,scheduled_time,captured_at,topic_slug,hook_line,
+             ayah_key,ayah_text,iraqi_explanation,background_query,visual_style,music_file,metrics_json,
              reach,saved,shares,likes,comments,views,total_interactions)
-            VALUES (:media_id,:snapshot_period,:target_at,:published_at,:captured_at,:topic_slug,
-                    :hook_line,:ayah_key,:ayah_text,:iraqi_explanation,:visual_style,:music_file,
+            VALUES (:media_id,:snapshot_period,:target_at,:published_at,:scheduled_time,:captured_at,:topic_slug,
+                    :hook_line,:ayah_key,:ayah_text,:iraqi_explanation,:background_query,:visual_style,:music_file,:metrics_json,
                     :reach,:saved,:shares,:likes,:comments,:views,:total_interactions)
             ON CONFLICT (media_id,snapshot_period) DO NOTHING
         """), values)
@@ -110,9 +126,13 @@ def _persist_learning(factory, row: dict, period: str, metrics: dict,
     context = {
         "media_id": str(row["media_id"]), "snapshot_period": period,
         "captured_at": captured_at.isoformat(), "topic_slug": row.get("topic_slug", ""),
+        "scheduled_time": row.get("scheduled_time", ""),
+        "published_at": row.get("published_at", ""),
+        "date": row.get("date", ""),
         "hook_line": row.get("hook_line", ""), "ayah_key": row.get("ayah_key", ""),
         "ayah_text": row.get("ayah_text", ""),
         "iraqi_explanation": row.get("iraqi_explanation", ""),
+        "background_query": row.get("background_query", ""),
         "visual_style": row.get("visual_style", ""), "music_file": row.get("music_file", ""),
     }
     try:
@@ -239,21 +259,30 @@ def main():
                 try:
                     _persist_learning(factory, row, period, metrics, captured_at)
                     _save_snapshot(factory.engine, row, period, target_at, captured_at, metrics)
-                    # Keep the human-readable tab useful without making it the source of truth.
-                    sheets.append_post_performance({
-                        "date": row.get("date", ""), "topic_slug": row.get("topic_slug", ""),
-                        "hook_line": row.get("hook_line", ""), "fact_line": row.get("fact_line", ""),
-                        "caption_arabic": row.get("caption_arabic", ""), "hashtags": row.get("hashtags", ""),
-                        "media_id": row["media_id"], "published_at": row.get("published_at", ""),
-                        "fetched_at": captured_at.isoformat(), "snapshot_period": period,
-                        "target_at": target_at.isoformat(),
-                        "reach": metrics.get("reach", ""), "saved": metrics.get("saved", ""),
-                        "shares": metrics.get("shares", ""), "likes": metrics.get("likes", ""),
-                        "comments": metrics.get("comments", ""), "views": metrics.get("views", ""),
-                        "ayah_key": row.get("ayah_key", ""), "ayah_text": row.get("ayah_text", ""),
-                        "iraqi_explanation": row.get("iraqi_explanation", ""),
-                        "music_file": row.get("music_file", ""), "visual_style": row.get("visual_style", ""),
-                    })
+                    # The Sheet is a convenience mirror; Supabase and the
+                    # learning observations above are canonical. A Sheets API
+                    # outage must not invalidate an already-saved measurement.
+                    try:
+                        sheets.append_post_performance({
+                            "date": row.get("date", ""), "topic_slug": row.get("topic_slug", ""),
+                            "hook_line": row.get("hook_line", ""), "fact_line": row.get("fact_line", ""),
+                            "caption_arabic": row.get("caption_arabic", ""), "hashtags": row.get("hashtags", ""),
+                            "media_id": row["media_id"], "published_at": row.get("published_at", ""),
+                            "fetched_at": captured_at.isoformat(), "snapshot_period": period,
+                            "target_at": target_at.isoformat(),
+                            "reach": metrics.get("reach", ""), "saved": metrics.get("saved", ""),
+                            "shares": metrics.get("shares", ""), "likes": metrics.get("likes", ""),
+                            "comments": metrics.get("comments", ""), "views": metrics.get("views", ""),
+                            "ayah_key": row.get("ayah_key", ""), "ayah_text": row.get("ayah_text", ""),
+                            "iraqi_explanation": row.get("iraqi_explanation", ""),
+                            "background_query": row.get("background_query", ""),
+                            "music_file": row.get("music_file", ""), "visual_style": row.get("visual_style", ""),
+                        })
+                    except Exception as sheet_exc:
+                        print(
+                            f"WARNING: Supabase/learning saved {row['media_id']}/{period}, "
+                            f"but Post_Performance Sheet mirror failed: {sheet_exc}"
+                        )
                     fetched += 1
                     print(f"Saved {period} cumulative insights for {row['media_id']} at {captured_at.isoformat()}")
                 except Exception as exc:
