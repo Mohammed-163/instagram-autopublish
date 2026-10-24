@@ -50,7 +50,14 @@ def load_supabase_performance_summary() -> dict:
             if not item.media_id:
                 continue
             record = media.setdefault(str(item.media_id), {"metrics": {}, "context": item.context or {}})
-            record["metrics"].setdefault(str(item.metric_name), float(item.metric_value))
+            name = str(item.metric_name)
+            # Compare mature 24-hour snapshots across posts, not a mixture of
+            # 1-hour and 7-day totals. Older unsuffixed observations remain valid.
+            if name.endswith("_24h"):
+                name = name[:-4]
+            elif any(name.endswith(f"_{period}") for period in ("1h", "2h", "6h", "3d", "7d")):
+                continue
+            record["metrics"].setdefault(name, float(item.metric_value))
 
         posts = []
         for media_id, record in media.items():
@@ -64,6 +71,7 @@ def load_supabase_performance_summary() -> dict:
                 "ayah_key": context.get("ayah_key", ""),
                 "visual_style": context.get("visual_style", ""),
                 "music": context.get("music_file", ""),
+                "hook": context.get("hook_line", ""),
                 "reach": int(reach),
                 "saved": int(metrics.get("saved", 0)),
                 "shares": int(metrics.get("shares", 0)),
@@ -75,11 +83,14 @@ def load_supabase_performance_summary() -> dict:
         posts.sort(key=lambda row: (row["score"], row["reach"], row["media_id"]), reverse=True)
         by_style: dict[str, list[float]] = defaultdict(list)
         by_music: dict[str, list[float]] = defaultdict(list)
+        by_hook: dict[str, list[float]] = defaultdict(list)
         for post in posts:
             if post["visual_style"]:
                 by_style[post["visual_style"]].append(post["score"])
             if post["music"]:
                 by_music[post["music"]].append(post["score"])
+            if post["hook"]:
+                by_hook[post["hook"]].append(post["score"])
 
         def averages(groups: dict[str, list[float]]) -> list[dict]:
             return [
@@ -95,6 +106,7 @@ def load_supabase_performance_summary() -> dict:
             "bottom_posts": list(reversed(posts[-5:])),
             "by_visual_style": averages(by_style),
             "by_music": averages(by_music),
+            "by_hook": averages(by_hook),
         }
     finally:
         session.close()
