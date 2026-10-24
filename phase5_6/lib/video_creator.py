@@ -182,7 +182,7 @@ class VideoCreator:
         img.save(output_path, "PNG")
         return output_path
 
-    def choose_music(self) -> str:
+    def choose_music(self, performance_weights: dict[str, float] | None = None) -> str:
         if not os.path.isdir(self.music_dir):
             raise FileNotFoundError(f"Music folder does not exist: {self.music_dir}")
         choices = sorted(
@@ -192,7 +192,13 @@ class VideoCreator:
         )
         if not choices:
             raise FileNotFoundError(f"Add at least one royalty-cleared .mp3 file to {self.music_dir}")
-        return random.choice(choices)
+        if not performance_weights:
+            return random.choice(choices)
+        # Keep selection random and exploratory, while modestly favoring tracks
+        # with at least three mature observations in the prior plan's data.
+        weights = [max(0.5, float(performance_weights.get(os.path.basename(path), 0.75)))
+                   for path in choices]
+        return random.choices(choices, weights=weights, k=1)[0]
 
     def image_to_video(self, image_path: str, output_path: str, music_path: str) -> str:
         command = [
@@ -212,8 +218,9 @@ class VideoCreator:
 
     def build_post_video(self, background_path: str, ayah_text: str, reference: str,
                          explanation: str, workdir: str, output_filename: str,
-                         hook_line: str = "") -> tuple[str, str]:
-        music_path = self.choose_music()
+                         hook_line: str = "",
+                         music_weights: dict[str, float] | None = None) -> tuple[str, str]:
+        music_path = self.choose_music(music_weights)
         image_path = os.path.join(workdir, "temp_frame.png")
         video_path = os.path.join(workdir, output_filename)
         self.create_image(
