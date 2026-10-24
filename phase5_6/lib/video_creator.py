@@ -19,6 +19,7 @@ class VideoCreator:
     def __init__(self, font_path: str | None = None, music_dir: str | None = None):
         self.quran_font_path = self._find_font(font_path or config.FONT_PATH)
         self.arabic_font_path = self._find_arabic_font()
+        self.hook_font_path = self._find_hook_font()
         self.music_dir = music_dir or os.path.abspath(
             os.path.join(os.path.dirname(__file__), "..", "..", "mp3")
         )
@@ -58,6 +59,21 @@ class VideoCreator:
             return config.FONT_FALLBACK_PATH
         return VideoCreator._find_font(config.FONT_PATH)
 
+    @staticmethod
+    def _find_hook_font() -> str:
+        """Use an elegant Arabic display face, falling back to the bundled bold font."""
+        try:
+            result = subprocess.run(
+                ["fc-match", "-f", "%{file}", "Amiri"],
+                capture_output=True, text=True, check=False, timeout=5,
+            )
+            matched = result.stdout.strip()
+            if result.returncode == 0 and os.path.isfile(matched):
+                return matched
+        except (FileNotFoundError, subprocess.SubprocessError):
+            pass
+        return config.FONT_FALLBACK_PATH
+
     def _load_background(self, image_path: str) -> Image.Image:
         img = Image.open(image_path).convert("RGB")
         target_ratio = config.VIDEO_WIDTH / config.VIDEO_HEIGHT
@@ -91,19 +107,20 @@ class VideoCreator:
 
     def _draw_fit(self, draw: ImageDraw.ImageDraw, text: str, y: int,
                   max_height: int, base_size: int, color: tuple[int, int, int],
-                  max_width: int = 920, quranic: bool = False) -> int:
-        font_path = self.quran_font_path if quranic else self.arabic_font_path
+                  max_width: int = 920, quranic: bool = False,
+                  font_path: str | None = None) -> int:
+        font_path = font_path or (self.quran_font_path if quranic else self.arabic_font_path)
         size = base_size
         while size >= 28:
             font = ImageFont.truetype(font_path, size)
             lines = self._wrap(draw, text, font, max_width)
-            line_height = max(1, int(size * 1.48))
+            line_height = max(1, int(size * 1.5))
             if len(lines) * line_height <= max_height:
                 break
             size -= 2
         font = ImageFont.truetype(font_path, size)
         lines = self._wrap(draw, text, font, max_width)
-        line_height = max(1, int(size * 1.48))
+        line_height = max(1, int(size * 1.5))
         for index, line in enumerate(lines):
             box = draw.textbbox((0, 0), line, font=font, direction="rtl", language="ar")
             x = (config.VIDEO_WIDTH - (box[2] - box[0])) // 2
@@ -112,7 +129,8 @@ class VideoCreator:
         return y + len(lines) * line_height
 
     def create_image(self, background_path: str, ayah_text: str, reference: str,
-                     explanation: str, output_path: str) -> str:
+                     explanation: str, output_path: str,
+                     hook_line: str = "") -> str:
         img = self._load_background(background_path).convert("RGBA")
         wash = Image.new("RGBA", img.size, (250, 242, 222, int(255 * config.OVERLAY_OPACITY)))
         img = Image.alpha_composite(img, wash).convert("RGB")
@@ -126,16 +144,35 @@ class VideoCreator:
         img = Image.alpha_composite(img.convert("RGBA"), panel).convert("RGB")
         draw = ImageDraw.Draw(img)
 
+        card_bottom = 1555
+        y = 355
+        if hook_line.strip():
+            hook_bottom = self._draw_fit(
+                draw, hook_line.strip(), y, 180, 64, _hex_to_rgb("#8C5A27"),
+                max_width=900, font_path=self.hook_font_path,
+            )
+            # Leave breathing room between the hook and the Quranic text.
+            y = hook_bottom + 48
+
         ayah = f"﴿{ayah_text}﴾"
-        y = 430
-        y = self._draw_fit(draw, ayah, y, 730, 76, _hex_to_rgb("#4E3523"), max_width=890, quranic=True)
+        ayah_max_height = max(300, min(700, card_bottom - y - 500))
+        y = self._draw_fit(
+            draw, ayah, y, ayah_max_height, 76, _hex_to_rgb("#4E3523"),
+            max_width=890, quranic=True,
+        )
         ref_font = ImageFont.truetype(self.arabic_font_path, 37)
         ref_text = f"سورة {reference}"
         ref_box = draw.textbbox((0, 0), ref_text, font=ref_font, direction="rtl", language="ar")
         draw.text(((config.VIDEO_WIDTH - (ref_box[2] - ref_box[0])) // 2, y + 18), ref_text,
                   font=ref_font, fill=_hex_to_rgb("#8C6A3F"), direction="rtl", language="ar")
-        draw.line((190, y + 82, config.VIDEO_WIDTH - 190, y + 82), fill=(176, 137, 83), width=2)
-        self._draw_fit(draw, explanation, y + 125, 470, 52, _hex_to_rgb("#3F342A"), max_width=850)
+        divider_y = y + 18 + int(37 * 1.5) + 22
+        draw.line((190, divider_y, config.VIDEO_WIDTH - 190, divider_y), fill=(176, 137, 83), width=2)
+        explanation_y = divider_y + int(42 * 1.5)
+        explanation_height = max(150, card_bottom - explanation_y - 35)
+        self._draw_fit(
+            draw, explanation, explanation_y, explanation_height, 52,
+            _hex_to_rgb("#3F342A"), max_width=850,
+        )
         img.save(output_path, "PNG")
         return output_path
 
@@ -168,11 +205,15 @@ class VideoCreator:
         return output_path
 
     def build_post_video(self, background_path: str, ayah_text: str, reference: str,
-                         explanation: str, workdir: str, output_filename: str) -> tuple[str, str]:
+                         explanation: str, workdir: str, output_filename: str,
+                         hook_line: str = "") -> tuple[str, str]:
         music_path = self.choose_music()
         image_path = os.path.join(workdir, "temp_frame.png")
         video_path = os.path.join(workdir, output_filename)
-        self.create_image(background_path, ayah_text, reference, explanation, image_path)
+        self.create_image(
+            background_path, ayah_text, reference, explanation, image_path,
+            hook_line=hook_line,
+        )
         self.image_to_video(image_path, video_path, music_path)
         for path in (image_path, background_path):
             if os.path.exists(path):
