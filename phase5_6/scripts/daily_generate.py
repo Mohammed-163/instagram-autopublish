@@ -4,6 +4,7 @@ Reads today's plan, generates N posts (content + video), uploads to Drive,
 logs to Daily_Log with status=ready.
 """
 import argparse
+import json
 import os
 import sys
 import tempfile
@@ -256,6 +257,7 @@ def main():
                     verse["text"],
                     f"{verse['surah']} {verse['key']}",
                     recent_explanations,
+                    learned_hook_guidance=str(plan.get(f"post_{i}_hook_guidance") or ""),
                 )
                 content["hook_line"] = content["hook_line"].strip()
                 content["fact_line"] = content["iraqi_explanation"].strip()
@@ -302,6 +304,7 @@ def main():
                         bg_path, verse["text"], f"{verse['surah']}، الآية {verse['ayah']}",
                         content["fact_line"], tmpdir, output_filename,
                         hook_line=content["hook_line"],
+                        music_weights=json.loads(plan.get("music_weights_json") or "{}"),
                     )
 
                     drive_file_id = drive.upload_video(
@@ -313,7 +316,15 @@ def main():
 
                 # Enforce the current policy even when the weekly sheet still
                 # contains previous 19:00/23:00 values.
-                scheduled_time_hhmm = "13:00" if post_count == 2 and i == 1 else "18:00"
+                default_time = "13:00" if post_count == 2 and i == 1 else "18:00"
+                scheduled_time_hhmm = str(plan.get(f"post_{i}_time") or default_time).strip()
+                try:
+                    datetime.strptime(scheduled_time_hhmm, "%H:%M")
+                except ValueError as exc:
+                    raise CriticalError(
+                        f"Invalid planned time in Current_Plan for post_{i}_time: "
+                        f"{scheduled_time_hhmm!r}; expected HH:MM Baghdad time."
+                    ) from exc
                 # post_N_time from the weekly plan is Baghdad-local (best audience
                 # engagement hours). Everything else in Daily_Log (published_at,
                 # cleaned_at) is stored in UTC via datetime.utcnow(), and publish.py
