@@ -45,6 +45,9 @@ jobs:
           PIXABAY_API_KEY:                   ${{ secrets.PIXABAY_API_KEY }}
           TELEGRAM_BOT_TOKEN:                ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID:                  ${{ secrets.TELEGRAM_CHAT_ID }}
+          DATABASE_URL:                      ${{ secrets.DATABASE_URL }}
+          LEARNING_LAYER_DATABASE_URL:       ${{ secrets.DATABASE_URL }}
+          OBSERVATION_DB_DSN:                ${{ secrets.DATABASE_URL }}
           DRY_RUN:                           ${{ github.event.inputs.dry_run || 'false' }}
         run: python phase5_6/scripts/daily_generate.py
 
