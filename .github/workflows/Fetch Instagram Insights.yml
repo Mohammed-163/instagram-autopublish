@@ -2,8 +2,12 @@ name: Fetch Instagram Insights
 
 on:
   schedule:
-    - cron: "0 5 * * *"   # 08:00 Asia/Baghdad
+    - cron: "*/15 * * * *"   # Poll due milestones every 15 minutes (GitHub may delay scheduled runs)
   workflow_dispatch:
+
+concurrency:
+  group: instagram-insight-snapshots
+  cancel-in-progress: false
 
 jobs:
   fetch-insights:
