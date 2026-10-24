@@ -127,6 +127,37 @@ def _check_required_env_vars(names: list[str]) -> None:
         raise SystemExit(1)
 
 
+def _require_env(name: str) -> str:
+    getter = getattr(config, "require_env", None)
+    if callable(getter):
+        return getter(name)
+    value = os.environ.get(name)
+    if not value:
+        raise RuntimeError(f"Missing required environment variable: {name}")
+    return value
+
+
+def _optional_env(name: str, default: str = "") -> str:
+    getter = getattr(config, "optional_env", None)
+    if callable(getter):
+        return getter(name, default)
+    return os.environ.get(name, default)
+
+
+def _load_json_secret(loader_name: str, encoded_name: str, raw_name: str) -> str:
+    loader = getattr(config, loader_name, None)
+    if callable(loader):
+        return loader()
+    encoded = os.environ.get(encoded_name)
+    if encoded:
+        import base64
+        try:
+            return base64.b64decode(encoded, validate=True).decode("utf-8")
+        except Exception as exc:
+            raise RuntimeError(f"Invalid {encoded_name}: {exc}") from exc
+    return _require_env(raw_name)
+
+
 def _get_today_theme_from_weekly_plan(now: datetime) -> tuple[str | None, str | None]:
     """Read today's theme from the active weekly plan, failing open safely."""
     try:
@@ -156,8 +187,11 @@ def main():
 
     _check_required_env_vars(REQUIRED_VARS)
 
-    notifier = TelegramNotifier(config.require_env("TELEGRAM_BOT_TOKEN"), config.require_env("TELEGRAM_CHAT_ID"))
-    sheets = SheetsClient(config.load_sheets_service_account_json(), config.require_env("GOOGLE_SHEET_ID"))
+    notifier = TelegramNotifier(_require_env("TELEGRAM_BOT_TOKEN"), _require_env("TELEGRAM_CHAT_ID"))
+    sheets = SheetsClient(
+        _load_json_secret("load_sheets_service_account_json", "GOOGLE_SERVICE_ACCOUNT_JSON_B64", "GOOGLE_SERVICE_ACCOUNT_JSON"),
+        _require_env("GOOGLE_SHEET_ID"),
+    )
 
     try:
         if sheets.is_paused():
@@ -180,19 +214,22 @@ def main():
         recent_explanations = list(history["explanations"])
 
         gemini_keys = [
-            config.optional_env("GEMINI_API_KEY_1"),
-            config.optional_env("GEMINI_API_KEY_2"),
-            config.optional_env("GEMINI_API_KEY_3"),
+            _optional_env("GEMINI_API_KEY_1"),
+            _optional_env("GEMINI_API_KEY_2"),
+            _optional_env("GEMINI_API_KEY_3"),
         ]
-        gemini = GeminiClient(gemini_keys, image_check_key=config.require_env("GEMINI_API_KEY_IMAGE_CHECK"))
-        pixabay = PixabayClient(config.require_env("PIXABAY_API_KEY"))
+        gemini = GeminiClient(gemini_keys, image_check_key=_require_env("GEMINI_API_KEY_IMAGE_CHECK"))
+        pixabay = PixabayClient(_require_env("PIXABAY_API_KEY"))
         video_creator = VideoCreator()
 
         if args.dry_run:
             print(f"[DRY RUN] Would generate {post_count} post(s) for {date_str} from weekly plan {week_start}")
             return
 
-        drive = DriveClient(config.load_drive_oauth_token_json(), config.require_env("GOOGLE_DRIVE_FOLDER_ID"))
+        drive = DriveClient(
+            _load_json_secret("load_drive_oauth_token_json", "GOOGLE_OAUTH_TOKEN_JSON_B64", "GOOGLE_OAUTH_TOKEN_JSON"),
+            _require_env("GOOGLE_DRIVE_FOLDER_ID"),
+        )
         month_folder_id = drive.get_or_create_month_folder(month_label)
         try:
             video_creator.choose_music()  # fail before spending API calls when mp3/ is empty
@@ -264,6 +301,7 @@ def main():
                     video_path, music_filename = video_creator.build_post_video(
                         bg_path, verse["text"], f"{verse['surah']}، الآية {verse['ayah']}",
                         content["fact_line"], tmpdir, output_filename,
+                        hook_line=content["hook_line"],
                     )
 
                     drive_file_id = drive.upload_video(
@@ -328,7 +366,7 @@ def main():
             except Exception:
                 handle_unexpected(
                     notifier, gemini,
-                    config.optional_env("GH_PAT"), config.optional_env("GH_REPO"),
+                    _optional_env("GH_PAT"), _optional_env("GH_REPO"),
                     "scripts/daily_generate.py", "post generation loop iteration", date_str,
                 )
                 continue  # try the next post rather than aborting the whole day
