@@ -114,19 +114,23 @@ class VideoCreator:
         while size >= 28:
             font = ImageFont.truetype(font_path, size)
             lines = self._wrap(draw, text, font, max_width)
-            line_height = max(1, int(size * 1.5))
+            boxes = [draw.textbbox((0, 0), line, font=font, direction="rtl", language="ar") for line in lines]
+            # Keep 1.5-line rhythm, expanding Quranic lines when tall marks need it.
+            line_height = max(int(size * 1.5), max((b[3] - b[1] for b in boxes), default=size) + int(size * 0.30))
             if len(lines) * line_height <= max_height:
                 break
             size -= 2
         font = ImageFont.truetype(font_path, size)
         lines = self._wrap(draw, text, font, max_width)
-        line_height = max(1, int(size * 1.5))
+        boxes = [draw.textbbox((0, 0), line, font=font, direction="rtl", language="ar") for line in lines]
+        line_height = max(int(size * 1.5), max((b[3] - b[1] for b in boxes), default=size) + int(size * 0.30))
         for index, line in enumerate(lines):
-            box = draw.textbbox((0, 0), line, font=font, direction="rtl", language="ar")
+            box = boxes[index]
             x = (config.VIDEO_WIDTH - (box[2] - box[0])) // 2
-            draw.text((x, y + index * line_height), line, font=font, fill=color,
-                      direction="rtl", language="ar", stroke_width=1, stroke_fill=(255, 248, 235))
-        return y + len(lines) * line_height
+            draw.text((x, y + index * line_height - box[1]), line, font=font, fill=color,
+                      direction="rtl", language="ar",
+                      stroke_width=0 if quranic else 1, stroke_fill=(255, 248, 235))
+        return y + (len(lines) - 1) * line_height + max((b[3] - b[1] for b in boxes), default=size)
 
     def create_image(self, background_path: str, ayah_text: str, reference: str,
                      explanation: str, output_path: str,
@@ -160,12 +164,14 @@ class VideoCreator:
             draw, ayah, y, ayah_max_height, 76, _hex_to_rgb("#4E3523"),
             max_width=890, quranic=True,
         )
-        ref_font = ImageFont.truetype(self.arabic_font_path, 37)
+        ref_font = ImageFont.truetype(self.arabic_font_path, 34)
         ref_text = f"سورة {reference}"
         ref_box = draw.textbbox((0, 0), ref_text, font=ref_font, direction="rtl", language="ar")
-        draw.text(((config.VIDEO_WIDTH - (ref_box[2] - ref_box[0])) // 2, y + 18), ref_text,
+        ref_top = y + 38
+        draw.text(((config.VIDEO_WIDTH - (ref_box[2] - ref_box[0])) // 2, ref_top - ref_box[1]), ref_text,
                   font=ref_font, fill=_hex_to_rgb("#8C6A3F"), direction="rtl", language="ar")
-        divider_y = y + 18 + int(37 * 1.5) + 22
+        ref_bottom = ref_top + (ref_box[3] - ref_box[1])
+        divider_y = ref_bottom + 30
         draw.line((190, divider_y, config.VIDEO_WIDTH - 190, divider_y), fill=(176, 137, 83), width=2)
         explanation_y = divider_y + int(42 * 1.5)
         explanation_height = max(150, card_bottom - explanation_y - 35)
