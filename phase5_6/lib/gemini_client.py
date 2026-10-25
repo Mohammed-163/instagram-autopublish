@@ -19,7 +19,11 @@ _PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(
 if _PROJECT_ROOT not in sys.path:
     sys.path.insert(0, _PROJECT_ROOT)
 
-from operational.gemini_rotation import GeminiRotationEngine, AllCombinationsExhaustedError, FREE_MODELS
+from operational.gemini_rotation import (
+    GeminiRotationEngine,
+    AllCombinationsExhaustedError,
+    FREE_MODELS,
+)
 from . import config
 
 
@@ -29,8 +33,9 @@ class AllKeysExhaustedError(Exception):
 
 class ImageVettingError(Exception):
     """Raised when the Gemini Vision image-vetting call fails (API error, bad key,
-    unreadable file, or unparseable response).  Distinct from a *rejection* result
-    (selected_index == -1), which is a normal outcome and returns None instead."""
+    unreadable file, or unparseable response. Distinct from a rejection result
+    (selected_index == -1), which is a normal outcome and returns None instead.
+    """
 
 
 class GeminiClient:
@@ -53,7 +58,13 @@ class GeminiClient:
     @staticmethod
     def _normalize_iraqi_dialect(data: dict) -> dict:
         """Prefer the unambiguous Iraqi word for tomorrow in generated copy."""
-        for field in ("hook_line", "iraqi_explanation", "fact_line", "cta_line", "caption_arabic"):
+        for field in (
+            "hook_line",
+            "iraqi_explanation",
+            "fact_line",
+            "cta_line",
+            "caption_arabic",
+        ):
             value = data.get(field)
             if isinstance(value, str):
                 data[field] = value.replace("باكر", "باجر")
@@ -102,7 +113,7 @@ class GeminiClient:
 مواضيع نُشرت مسبقاً ويجب تجنب تكرارها: {avoid_list}
 {day_context}
 
-الملطوب: حقيقة نفسية واحدة، مثبتة علمياً وموثوقة فعلاً (وليست خرافة شائعة أو معلومة غير مؤكدة).
+المطلوب: حقيقة نفسية واحدة، مثبتة علمياً وموثوقة فعلاً (وليست خرافة شائعة أو معلومة غير مؤكدة).
 إذا لم تكن متأكداً 100% من صحة معلومة معينة علمياً، اختر موضوعاً نفسياً آخر تكون واثقاً منه بدلاً منها.
 لا تقدم أي تشخيص أو نصيحة طبية/علاجية مباشرة.
 
@@ -128,8 +139,14 @@ class GeminiClient:
             raw = self._call_with_fallback(prompt)
             try:
                 data = self._extract_json(raw)
-                required = ["topic_slug", "hook_line", "fact_line", "cta_line", "pixabay_query"]
-                if not all(k in data for k in required):
+                required = [
+                    "topic_slug",
+                    "hook_line",
+                    "fact_line",
+                    "cta_line",
+                    "pixabay_query",
+                ]
+                if not all(key in data for key in required):
                     continue
                 return data
             except (json.JSONDecodeError, ValueError):
@@ -142,9 +159,27 @@ class GeminiClient:
         ayah_text: str,
         ayah_reference: str,
         recent_explanations: list[str] | None = None,
+        learned_hook_guidance: str = "",
     ) -> dict:
         """Write the Iraqi reflection and caption around an immutable, sourced ayah."""
-        recent = "\n".join(f"- {item}" for item in (recent_explanations or []) if item)
+        recent = "\n".join(
+            f"- {item}" for item in (recent_explanations or []) if item
+        )
+
+        if learned_hook_guidance.strip():
+            hook_guidance = (
+                "إرشادات أسلوب الهوك المستفادة من أداء المنشورات "
+                "(اتبع الأسلوب ولا تنسخ أي مثال حرفياً): "
+                f"{learned_hook_guidance.strip()}"
+            )
+        else:
+            hook_guidance = (
+                "لا توجد بيانات كافية إحصائياً عن أداء الهوكات؛ "
+                "اكتب هوك عراقياً طبيعياً ومناسباً لموضوع الآية."
+            )
+
+        recent = f"{recent}\n{hook_guidance}".strip()
+
         prompt = f"""أنت محرر محتوى إيماني لمنشورات إنستغرام باللهجة العراقية الطبيعية.
 
 موضوع المنشور المخطط: {planned_topic}
@@ -159,7 +194,8 @@ class GeminiClient:
 الغد فاستخدم «باجر» حصراً، ولا تستخدم «باكر» أو «غداً». راجع كل مفردة عامية قبل الإخراج.
 اكتب hook_line من 5 إلى 12 كلمة باللهجة العراقية، يربط همّاً يومياً
 بموضوع الآية ويهيئ لها قبل ظهورها. مثال للرزق: «انت شايل هم رزقك؟ وربك يقول:».
-اجعل الهوك مخصصاً للموضوع لا تكرر المثال، ولا تنسب كلاماً للقرآن.
+اتبع إرشادات أسلوب الهوك الواردة أعلاه إن وُجدت، لكن لا تنسخها حرفياً.
+اجعل الهوك مخصصاً للموضوع، ولا تنسب كلاماً للقرآن.
 اكتب جملة افتتاحية عراقية قصيرة، ودعوة تفاعل لطيفة غير ملحّة، وتعليقاً قصيراً.
 لا تكتب نص الآية في حقولك؛ سيُضاف النص الأصلي من المصدر بعد التوليد.
 pixabay_query يجب أن تكون 2-4 كلمات إنجليزية عن صورة فوتوغرافية هادئة مناسبة للموضوع.
@@ -174,7 +210,15 @@ pixabay_query يجب أن تكون 2-4 كلمات إنجليزية عن صورة
   "caption_arabic": "...",
   "hashtags": "#... #..."
 }}"""
-        required = ["topic_slug", "hook_line", "iraqi_explanation", "cta_line", "pixabay_query", "caption_arabic", "hashtags"]
+        required = [
+            "topic_slug",
+            "hook_line",
+            "iraqi_explanation",
+            "cta_line",
+            "pixabay_query",
+            "caption_arabic",
+            "hashtags",
+        ]
         for _ in range(3):
             data = self._extract_json(self._call_with_fallback(prompt))
             if all(str(data.get(key, "")).strip() for key in required):
@@ -183,9 +227,16 @@ pixabay_query يجب أن تكون 2-4 كلمات إنجليزية عن صورة
                 data = self._normalize_iraqi_dialect(data)
                 data["fact_line"] = data["iraqi_explanation"]
                 return data
-        raise ValueError("Gemini did not return all required hope-post fields after 3 attempts")
+        raise ValueError(
+            "Gemini did not return all required hope-post fields after 3 attempts"
+        )
 
-    def generate_caption_and_hashtags(self, hook_line: str, fact_line: str, cta_line: str) -> dict:
+    def generate_caption_and_hashtags(
+        self,
+        hook_line: str,
+        fact_line: str,
+        cta_line: str,
+    ) -> dict:
         prompt = f"""أنت كاتب محتوى بارع لمنشورات انستغرام عربية.
 
 المعطيات:
@@ -203,7 +254,12 @@ pixabay_query يجب أن تكون 2-4 كلمات إنجليزية عن صورة
         raw = self._call_with_fallback(prompt)
         return self._extract_json(raw)
 
-    def build_monthly_plan(self, performance_data: str, competitor_data: str, date_str: str) -> dict:
+    def build_monthly_plan(
+        self,
+        performance_data: str,
+        competitor_data: str,
+        date_str: str,
+    ) -> dict:
         prompt = f"""أنت مستشار استراتيجي لمنصة انستغرام متخصصة بالمحتوى النفسي.
 
 بيانات الأداء الشهري:
@@ -253,8 +309,13 @@ pixabay_query يجب أن تكون 2-4 كلمات إنجليزية عن صورة
             "avoid_themes",
         ]
         expected_days = {
-            "sunday", "monday", "tuesday", "wednesday",
-            "thursday", "friday", "saturday",
+            "sunday",
+            "monday",
+            "tuesday",
+            "wednesday",
+            "thursday",
+            "friday",
+            "saturday",
         }
         required_day_fields = {"day_theme", "visual_mood", "post_count_target"}
         for attempt in range(3):
@@ -275,7 +336,11 @@ pixabay_query يجب أن تكون 2-4 كلمات إنجليزية عن صورة
                 continue
         raise ValueError("Failed to generate valid weekly plan after 3 attempts")
 
-    def build_weekly_content_plan(self, performance_summary: dict, week_start: str) -> dict:
+    def build_weekly_content_plan(
+        self,
+        performance_summary: dict,
+        week_start: str,
+    ) -> dict:
         """Turn measured prior-post performance into ten distinct upcoming topics."""
         prompt = f"""أنت مخطط محتوى لحساب إنستغرام عراقي ينشر آيات قرآنية باعثة على الأمل.
 الأسبوع يبدأ بتاريخ {week_start}.
@@ -295,9 +360,16 @@ pixabay_query يجب أن تكون 2-4 كلمات إنجليزية عن صورة
             posts = data.get("posts") if isinstance(data, dict) else None
             if not isinstance(posts, list) or len(posts) != 10:
                 continue
-            if any(not isinstance(item, dict) or not str(item.get("topic", "")).strip() for item in posts):
+            if any(
+                not isinstance(item, dict)
+                or not str(item.get("topic", "")).strip()
+                for item in posts
+            ):
                 continue
-            topics = [" ".join(str(item["topic"]).split()).casefold() for item in posts]
+            topics = [
+                " ".join(str(item["topic"]).split()).casefold()
+                for item in posts
+            ]
             if len(set(topics)) != 10:
                 continue
             for item in posts:
@@ -331,7 +403,7 @@ pixabay_query يجب أن تكون 2-4 كلمات إنجليزية عن صورة
 
         Raises:
             ImageVettingError: If the Gemini Vision API call itself fails, or a
-                               candidate image file cannot be read.  Callers must NOT
+                               candidate image file cannot be read. Callers must NOT
                                silently fall back to the first image on this error.
         """
         if not image_paths:
@@ -346,10 +418,10 @@ pixabay_query يجب أن تكون 2-4 كلمات إنجليزية عن صورة
             ) from exc
 
         # Prefer the dedicated image-check key so vetting never competes with
-        # text-generation quota.  Fall back to the first available rotation key.
+        # text-generation quota. Fall back to the first available rotation key.
         api_key = self._engine.image_check_key
         if not api_key:
-            available = [k for k in self._engine.api_keys if k]
+            available = [key for key in self._engine.api_keys if key]
             if not available:
                 raise ImageVettingError(
                     "No Gemini API key available for image vetting "
@@ -361,8 +433,8 @@ pixabay_query يجب أن تكون 2-4 كلمات إنجليزية عن صورة
         # then a single text instruction.
         # The previous implementation called img.get('tags', ...) on string paths —
         # that raised AttributeError which was silently swallowed by a bare
-        # 'except Exception: pass', causing the first image to always be returned
-        # without any real vetting.  Here we send the actual JPEG bytes so Gemini
+        # "except Exception: pass", causing the first image to always be returned
+        # without any real vetting. Here we send the actual JPEG bytes so Gemini
         # can inspect the images directly.
         parts = []
         for i, path in enumerate(image_paths):
@@ -373,19 +445,25 @@ pixabay_query يجب أن تكون 2-4 كلمات إنجليزية عن صورة
                 raise ImageVettingError(
                     f"Cannot read candidate image {path!r}: {exc}"
                 ) from exc
-            parts.append(genai_types.Part.from_bytes(data=image_bytes, mime_type="image/jpeg"))
+            parts.append(
+                genai_types.Part.from_bytes(data=image_bytes, mime_type="image/jpeg")
+            )
             parts.append(genai_types.Part.from_text(text=f"[صورة {i + 1}]"))
 
         n = len(image_paths)
-        parts.append(genai_types.Part.from_text(text=(
-            f'من الصور أعلاه ({n} صورة مُرقَّمة من 1 إلى {n})، '
-            f'اختر أفضل صورة خلفية لمنشور انستغرام عن: "{topic}".\n'
-            f'شروط القبول: الصورة لائقة، خالية من محتوى غير لائق (كحول/عري/عنف)، '
-            f'ومناسبة بصرياً للموضوع.\n'
-            f'إذا لم تجد أي صورة مقبولة اختر selected_index: -1.\n'
-            f'أخرج JSON فقط:\n'
-            f'{{"selected_index": <عدد صحيح 1-{n} أو -1>, "reason": "..."}}'
-        )))
+        parts.append(
+            genai_types.Part.from_text(
+                text=(
+                    f'من الصور أعلاه ({n} صورة مُرقَّمة من 1 إلى {n})، '
+                    f'اختر أفضل صورة خلفية لمنشور انستغرام عن: "{topic}".\n'
+                    f'شروط القبول: الصورة لائقة، خالية من محتوى غير لائق '
+                    f'(كحول/عري/عنف)، ومناسبة بصرياً للموضوع.\n'
+                    f'إذا لم تجد أي صورة مقبولة اختر selected_index: -1.\n'
+                    f'أخرج JSON فقط:\n'
+                    f'{{"selected_index": <عدد صحيح 1-{n} أو -1>, "reason": "..."}}'
+                )
+            )
+        )
 
         # Call Gemini Vision (bypasses rotation engine — intentional: image vetting
         # must not consume text-generation quota).
@@ -442,7 +520,7 @@ pixabay_query يجب أن تكون 2-4 كلمات إنجليزية عن صورة
 
         api_key = self._engine.image_check_key
         if not api_key:
-            available = [k for k in self._engine.api_keys if k]
+            available = [key for key in self._engine.api_keys if key]
             if not available:
                 print("⚠️ Gemini video vetting failed: no Gemini API key available")
                 return None
@@ -453,14 +531,19 @@ pixabay_query يجب أن تكون 2-4 كلمات إنجليزية عن صورة
                 with open(path, "rb") as fh:
                     video_bytes = fh.read()
                 parts = [
-                    genai_types.Part.from_bytes(data=video_bytes, mime_type="video/mp4"),
-                    genai_types.Part.from_text(text=(
-                        f'هل هذا الفيديو مناسب كخلفية لمنشور عن: "{topic}"؟ '
-                        "تحقق من الملاءمة البصرية للموضوع وخلوه من العري، الكحول، "
-                        "السجائر، العنف، الدم، الجرائم، الرموز الدينية غير المحايدة، "
-                        "وأي محتوى غير لائق آخر. أخرج JSON فقط: "
-                        '{"accepted": true/false, "reason": "..."}'
-                    )),
+                    genai_types.Part.from_bytes(
+                        data=video_bytes,
+                        mime_type="video/mp4",
+                    ),
+                    genai_types.Part.from_text(
+                        text=(
+                            f'هل هذا الفيديو مناسب كخلفية لمنشور عن: "{topic}"؟ '
+                            "تحقق من الملاءمة البصرية للموضوع وخلوه من العري، الكحول، "
+                            "السجائر، العنف، الدم، الجرائم، الرموز الدينية غير المحايدة، "
+                            "وأي محتوى غير لائق آخر. أخرج JSON فقط: "
+                            '{"accepted": true/false, "reason": "..."}'
+                        )
+                    ),
                 ]
                 client = genai.Client(api_key=api_key)
                 resp = client.models.generate_content(
@@ -473,8 +556,10 @@ pixabay_query يجب أن تكون 2-4 كلمات إنجليزية عن صورة
                 result = self._extract_json(raw)
                 if result.get("accepted") is True:
                     return path
-                else:
-                    print(f"⚠️ Gemini rejected video candidate {path!r}: {result.get('reason', 'no reason given')}")
+                print(
+                    f"⚠️ Gemini rejected video candidate {path!r}: "
+                    f"{result.get('reason', 'no reason given')}"
+                )
             except Exception as exc:
                 print(f"⚠️ Gemini video vetting failed for {path!r}: {exc}")
                 continue
