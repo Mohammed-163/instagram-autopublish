@@ -6,6 +6,7 @@ logs to Daily_Log with status=ready.
 import argparse
 import json
 import os
+import re
 import sys
 import tempfile
 from datetime import datetime
@@ -29,6 +30,55 @@ REQUIRED_VARS = [
     "GEMINI_API_KEY_1", "GEMINI_API_KEY_IMAGE_CHECK", "PIXABAY_API_KEY",
     "TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID",
 ]
+
+
+def _prepare_caption_and_hashtags(caption: str, hashtags, verse: dict) -> tuple[str, list[str]]:
+    """Remove model placeholders/duplicate verse text and return unique hashtags."""
+    caption = str(caption or "")
+    ayah_text = str(verse.get("text", "")).strip()
+    surah = str(verse.get("surah", "")).strip()
+    ayah_number = str(verse.get("ayah", "")).strip()
+
+    # The authoritative verse and reference are appended below from the catalogue.
+    caption = re.sub(
+        r"[\[\(\{]?\s*(?:\u0646\u0635\s+)?"
+        r"(?:\u0627\u0644\u0622\u064a\u0629|\u0627\u0644\u0627\u064a\u0629)"
+        r"\s+\u0647\u0646\u0627\s*[:\uff1a]?\s*[\]\)\}]?",
+        " ",
+        caption,
+        flags=re.IGNORECASE,
+    )
+    if ayah_text:
+        caption = caption.replace(ayah_text, " ")
+        caption = re.sub(r"[\ufd3f\ufd3e\u06de]", "", caption)
+
+    # Remove a reference the model may have included; the source reference is added once.
+    if surah and ayah_number:
+        reference_pattern = (
+            rf"(?:\u0633\u0648\u0631\u0629\s*)?{re.escape(surah)}\s*"
+            rf"(?:[|,\u060c:\uff1a]\s*|\s+)"
+            rf"(?:\u0627\u0644\u0622\u064a\u0629\s*)?"
+            rf"(?:\d+\s*[:\uff1a]\s*)?{re.escape(ayah_number)}"
+        )
+        caption = re.sub(reference_pattern, " ", caption, flags=re.IGNORECASE)
+
+    # Hashtags belong only in the separate hashtags field.
+    caption = re.sub(r"(?<!\w)#[\w\u200c\u200d]+", " ", caption)
+    caption = re.sub(r"[ \t]+", " ", caption)
+    caption = re.sub(r"\n\s*\n\s*\n+", "\n\n", caption)
+    caption = caption.strip()
+
+    raw_values = hashtags if isinstance(hashtags, (list, tuple, set)) else [hashtags]
+    unique_hashtags = []
+    seen = set()
+    for value in raw_values:
+        for tag in re.findall(r"(?<!\w)#[\w\u200c\u200d]+", str(value or "")):
+            key = tag.casefold()
+            if key not in seen:
+                seen.add(key)
+                unique_hashtags.append(tag)
+
+    return caption, unique_hashtags
 
 
 def _fetch_vetted_background(pixabay, gemini, pixabay_query: str, topic_summary: str, tmpdir: str) -> str:
@@ -261,17 +311,20 @@ def main():
                 )
                 content["hook_line"] = content["hook_line"].strip()
                 content["fact_line"] = content["iraqi_explanation"].strip()
-                content["caption_arabic"] = (
-                    f"{content['caption_arabic'].strip()}\n\n"
-                    f"﴿{verse['text']}﴾\n({verse['surah']}، الآية {verse['ayah']})"
+                clean_caption, clean_hashtags = _prepare_caption_and_hashtags(
+                    content.get("caption_arabic", ""),
+                    content.get("hashtags", ""),
+                    verse,
                 )
+                verse_reference = f"({verse['surah']}\u060c \u0627\u0644\u0622\u064a\u0629 {verse['ayah']})"
+                content["caption_arabic"] = (
+                    f"{clean_caption}\n\n\ufd3f{verse['text']}\ufd3e\n{verse_reference}"
+                ).strip()
                 if explanation_is_duplicate(content["fact_line"], recent_explanations):
                     raise ValueError("تفسير الآية مكرر أو قريب جداً من شرح سابق في هذا الأسبوع؛ أعد المحاولة.")
 
-                # Keep hashtags as tokens for the Daily_Log join below.
-                raw_hashtags = content.get("hashtags", "")
-                if isinstance(raw_hashtags, str):
-                    content["hashtags"] = raw_hashtags.split()
+                # Keep the normalized, deduplicated hashtags as tokens for Daily_Log.
+                content["hashtags"] = clean_hashtags
 
                 # ── Step 6/7: Validate ALL required fields ──────────────────
                 # This gate must run before ANY media operation so that a bad
