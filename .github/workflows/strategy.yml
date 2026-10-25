@@ -1,8 +1,6 @@
 name: Strategy — Weekly Content Planning
 
 on:
-  schedule:
-    - cron: "0 22 * * 6"   # 01:00 Sunday in Asia/Baghdad
   workflow_dispatch:
 
 concurrency:
@@ -20,12 +18,12 @@ jobs:
       - run: pip install -r requirements.txt google-genai --quiet
       - name: Generate weekly plan from Supabase learning data
         env:
-          GOOGLE_SHEET_ID:                 ${{ secrets.GOOGLE_SHEET_ID }}
+          GOOGLE_SHEET_ID:                   ${{ secrets.GOOGLE_SHEET_ID }}
           GOOGLE_SERVICE_ACCOUNT_JSON_B64: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON_B64 }}
           GEMINI_API_KEY_1:                ${{ secrets.GEMINI_API_KEY_1 }}
           GEMINI_API_KEY_2:                ${{ secrets.GEMINI_API_KEY_2 }}
           GEMINI_API_KEY_3:                ${{ secrets.GEMINI_API_KEY_3 }}
-          DATABASE_URL:                   ${{ secrets.DATABASE_URL }}
+          DATABASE_URL:                    ${{ secrets.DATABASE_URL }}
           SUPABASE_URL:                    ${{ secrets.SUPABASE_URL }}
           SUPABASE_SECRET_KEY:             ${{ secrets.SUPABASE_SECRET_KEY }}
           LEARNING_LAYER_DATABASE_URL:     ${{ secrets.DATABASE_URL }}
