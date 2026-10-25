@@ -1,8 +1,6 @@
 name: Token Refresh — Meta/Instagram (Weekly)
 
 on:
-  schedule:
-    - cron: "0 23 * * 6"   # Sunday 02:00 Baghdad = Saturday 23:00 UTC
   workflow_dispatch:
 
 concurrency:
