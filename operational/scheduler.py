@@ -9,7 +9,7 @@ Jobs and their default schedules (all overridable via env vars):
   publish       — every  15 min (publish due posts)
   strategy      — Sunday 01:00 (weekly plan; uses measured Instagram data)
   cleanup       — daily  00:00  (remove published Drive files)
-  fetch_insights— daily  08:00  (fetch IG performance data, 3 days lag)
+  fetch_insights— every  15 min (fetch due Instagram snapshots)
   token_refresh — weekly Sunday 02:00
   backup        — weekly Sunday 03:00
   health_check  — every  30 min
@@ -50,7 +50,8 @@ def _run_script(name: str) -> None:
     logger.info("Running script: %s", path)
     try:
         result = subprocess.run(
-            [sys.executable, path],
+            [sys.executable, "-m", f"phase5_6.scripts.{name.removesuffix('.py')}"],
+            cwd=os.path.dirname(os.path.dirname(_SCRIPTS_DIR)),
             capture_output=True, text=True, timeout=3600
         )
         if result.stdout:
@@ -58,13 +59,11 @@ def _run_script(name: str) -> None:
                 logger.info("[%s] %s", name, line)
         if result.returncode != 0:
             err = result.stderr[:500] if result.stderr else "(no stderr)"
-            logger.error("[%s] exited with code %d: %s", name, result.returncode, err)
+            raise RuntimeError(f"{name} exited with code {result.returncode}: {err}")
         else:
             logger.info("[%s] completed successfully", name)
     except subprocess.TimeoutExpired:
-        logger.error("[%s] timed out after 3600s", name)
-    except Exception as exc:
-        logger.exception("[%s] failed: %s", name, exc)
+        raise
 
 
 def _run_main() -> None:
@@ -133,7 +132,7 @@ def build_scheduler() -> "BlockingScheduler":
     # ── Fetch Instagram insights ───────────────────────────────────────────
     sched.add_job(
         lambda: _job(lambda: _run_script("fetch_insights.py"), "fetch_insights"),
-        CronTrigger.from_crontab(_cron("SCHEDULE_INSIGHTS", "0 8 * * *"), timezone=TIMEZONE),
+        CronTrigger.from_crontab(_cron("SCHEDULE_INSIGHTS", "*/15 * * * *"), timezone=TIMEZONE),
         id="fetch_insights", name="Fetch IG Insights",
     )
 

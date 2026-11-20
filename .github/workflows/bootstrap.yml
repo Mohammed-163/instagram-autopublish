@@ -55,7 +55,7 @@ jobs:
           KCL_DATABASE_URL:            "sqlite:///./phase9_test.db"
           P10_DATABASE_URL:            "sqlite:///./phase10_test.db"
         run: |
-          python -m pytest phase5_6/tests/ tests/phase8/ tests/phase9/ tests/phase10/ \
+          python -m pytest \
             -q --tb=short
 
       - name: Smoke-test full bootstrap
@@ -114,6 +114,7 @@ jobs:
                   print(f'  ✓ {mod}')
               except Exception as e:
                   print(f'  ✗ {mod}: {e}')
+              raise
           "
 
       - name: Cleanup test files

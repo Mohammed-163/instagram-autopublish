@@ -35,65 +35,50 @@ def load_supabase_performance_summary() -> dict:
         raise RuntimeError("Supabase/Postgres connection is required; configure LEARNING_LAYER_DATABASE_URL or DATABASE_URL or SUPABASE_URL.")
     from phase8_learning.config.settings import Settings
     from phase8_learning.database.connection import DatabaseConnectionFactory
-    from phase8_learning.database.models import LearningObservationModel
+    from sqlalchemy import inspect, text
+    from phase5_6.scripts.fetch_insights import MAX_SNAPSHOT_DELAY
 
-    settings = Settings.from_env()
-    factory = DatabaseConnectionFactory(settings)
-    session = factory.new_session()
+    factory = DatabaseConnectionFactory(Settings.from_env())
+    posts = []
     try:
-        since = datetime.now(timezone.utc) - timedelta(days=90)
-        observations = (
-            session.query(LearningObservationModel)
-            .filter(LearningObservationModel.created_at >= since)
-            .order_by(LearningObservationModel.created_at.desc())
-            .limit(5000)
-            .all()
-        )
-        media: dict[str, dict] = {}
-        for item in observations:
-            if not item.media_id:
-                continue
-            record = media.setdefault(str(item.media_id), {
-                "metrics": {}, "context": item.context or {}, "periods": set(),
-            })
-            name = str(item.metric_name)
-            period = (item.context or {}).get("snapshot_period")
-            if name.endswith("_24h"):
-                period = "24h"
-            if period:
-                record["periods"].add(str(period))
-            # Compare mature 24-hour snapshots across posts, not a mixture of
-            # 1-hour and 7-day totals. Older unsuffixed observations remain valid.
-            if name.endswith("_24h"):
-                name = name[:-4]
-            elif any(name.endswith(f"_{period}") for period in ("1h", "2h", "6h", "3d", "7d")):
-                continue
-            record["metrics"].setdefault(name, float(item.metric_value))
-
-        posts = []
-        for media_id, record in media.items():
-            metrics, context = record["metrics"], record["context"]
-            reach = float(metrics.get("reach", 0))
-            weighted = 3 * metrics.get("saved", 0) + 2 * metrics.get("shares", 0) + metrics.get("comments", 0) + metrics.get("likes", 0)
-            score = weighted / max(reach, 1.0)
-            posts.append({
-                "media_id": media_id,
-                "topic": context.get("topic_slug", ""),
-                "ayah_key": context.get("ayah_key", ""),
-                "visual_style": context.get("visual_style", ""),
-                "music": context.get("music_file", ""),
-                "hook": context.get("hook_line", ""),
-                "background_query": context.get("background_query", ""),
-                "scheduled_time": context.get("scheduled_time", ""),
-                "published_at": context.get("published_at", ""),
-                "measured_24h": "24h" in record["periods"],
-                "reach": int(reach),
-                "saved": int(metrics.get("saved", 0)),
-                "shares": int(metrics.get("shares", 0)),
-                "likes": int(metrics.get("likes", 0)),
-                "comments": int(metrics.get("comments", 0)),
-                "score": round(score, 6),
-            })
+        if inspect(factory.engine).has_table("instagram_insight_snapshots"):
+            with factory.engine.connect() as connection:
+                rows = connection.execute(text("""
+                    SELECT media_id, topic_slug, ayah_key, visual_style, music_file, hook_line,
+                           background_query, scheduled_time, published_at, target_at, captured_at,
+                           reach, views, saved, shares, likes, comments
+                    FROM instagram_insight_snapshots
+                    WHERE snapshot_period = '24h' AND reach > 0 AND published_at >= :since
+                    ORDER BY published_at DESC
+                """), {"since": datetime.now(timezone.utc) - timedelta(days=90)}).mappings()
+                for item in rows:
+                    target = _parse_local_datetime(item["target_at"])
+                    capture = _parse_local_datetime(item["captured_at"])
+                    if not target or not capture or not target <= capture <= target + MAX_SNAPSHOT_DELAY:
+                        continue
+                    weighted = sum(
+                        weight * (item[metric] or 0)
+                        for metric, weight in (("saved", 3), ("shares", 2), ("comments", 1), ("likes", 1))
+                    )
+                    posts.append({
+                        "media_id": item["media_id"],
+                        "topic": item["topic_slug"],
+                        "ayah_key": item["ayah_key"],
+                        "visual_style": item["visual_style"],
+                        "music": item["music_file"],
+                        "hook": item["hook_line"],
+                        "background_query": item["background_query"],
+                        "scheduled_time": str(item["scheduled_time"] or ""),
+                        "published_at": str(item["published_at"]),
+                        "measured_24h": True,
+                        "reach": item["reach"],
+                        "views": item["views"],
+                        "saved": item["saved"],
+                        "shares": item["shares"],
+                        "likes": item["likes"],
+                        "comments": item["comments"],
+                        "score": round(weighted / (item["reach"] + 20), 6),
+                    })
 
         posts.sort(key=lambda row: (row["score"], row["reach"], row["media_id"]), reverse=True)
         by_style: dict[str, list[float]] = defaultdict(list)
@@ -128,10 +113,11 @@ def load_supabase_performance_summary() -> dict:
         }
 
         return {
-            "source": "Supabase learning_observations populated from Instagram Graph API",
+            "source": "Supabase on-time 24-hour Instagram snapshots (last 90 days)",
             "sample_size": len(posts),
-            "score_definition": "(3*saved + 2*shares + comments + likes) / max(reach, 1)",
+            "score_definition": "(3*saved + 2*shares + comments + likes) / (reach + 20)",
             "top_posts": posts[:5],
+            "top_by_views": sorted(posts, key=lambda row: row["views"] or 0, reverse=True)[:5],
             "bottom_posts": list(reversed(posts[-5:])),
             "_all_posts": posts,
             "by_visual_style": averages(by_style),
@@ -141,7 +127,6 @@ def load_supabase_performance_summary() -> dict:
             "by_background_query": averages(by_background),
         }
     finally:
-        session.close()
         factory.engine.dispose()
 
 
@@ -163,17 +148,14 @@ def choose_publishing_times(posts: list[dict], current_week_start: date) -> dict
     for post in posts:
         if not post.get("measured_24h"):
             continue
-        scheduled = _parse_local_datetime(post.get("scheduled_time"))
         published = _parse_local_datetime(post.get("published_at"))
-        if scheduled is None or published is None or not (previous_start <= published.date() < current_week_start):
+        if published is None or not (previous_start <= published.date() < current_week_start):
             continue
         reach = int(post.get("reach") or 0)
         if reach <= 0:
             continue
         observed_posts += 1
-        weighted = (3 * int(post.get("saved") or 0) + 2 * int(post.get("shares") or 0)
-                    + int(post.get("comments") or 0) + int(post.get("likes") or 0))
-        hours[scheduled.hour].append((weighted / reach, reach))
+        hours[published.hour].append((post["score"], reach))
 
     qualified = {
         hour: {"posts": len(values), "score": sum(score for score, _ in values) / len(values),

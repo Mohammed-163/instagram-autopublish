@@ -428,11 +428,7 @@ def main():
                 # skipping the image-selection step.
                 raise CriticalError(f"فشل فحص الصور عبر Gemini Vision: {e}")
             except Exception:
-                handle_unexpected(
-                    notifier, gemini,
-                    _optional_env("GH_PAT"), _optional_env("GH_REPO"),
-                    "scripts/daily_generate.py", "post generation loop iteration", date_str,
-                )
+                handle_unexpected(notifier, "phase5_6/scripts/daily_generate.py")
                 continue  # try the next post rather than aborting the whole day
 
         notifier.notify_success(f"تم توليد {generated}/{post_count} منشور ليوم {date_str}")

@@ -369,8 +369,8 @@ class TestGeminiModelList:
         import sys
         sys.path.insert(0, str(_ROOT / "phase5_6"))
         from lib import config
-        # DEFAULT_TEXT_MODEL default is gemini-3.5-flash-lite (independent of rotation)
-        assert config.DEFAULT_TEXT_MODEL == "gemini-3.5-flash-lite"
+        # DEFAULT_TEXT_MODEL default is gemini-3.8-flash (independent of rotation)
+        assert config.DEFAULT_TEXT_MODEL == "gemini-3.8-flash"
         # Legacy alias must match
         assert config.GEMINI_MODEL_NAME == config.DEFAULT_TEXT_MODEL
 

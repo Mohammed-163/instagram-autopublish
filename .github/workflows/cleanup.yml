@@ -24,7 +24,7 @@ jobs:
           GOOGLE_OAUTH_TOKEN_JSON_B64:     ${{ secrets.GOOGLE_OAUTH_TOKEN_JSON_B64 }}
           TELEGRAM_BOT_TOKEN:              ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID:                ${{ secrets.TELEGRAM_CHAT_ID }}
-        run: python phase5_6/scripts/cleanup.py
+        run: python -m phase5_6.scripts.cleanup
       - name: Notify failure
         if: failure()
         uses: appleboy/telegram-action@master

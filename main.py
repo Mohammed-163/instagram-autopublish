@@ -8,6 +8,7 @@ add their own roots (which also contain database/ and config/ dirs).
 from __future__ import annotations
 import logging
 import os
+from functools import partial
 import sys
 
 _PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
@@ -132,7 +133,7 @@ def _wire_bridges(p8_container, p9_container, p10_app):
         from bridges.observation_to_learning import wire as wire_obs_learn
         from phase8_learning.main import run as p8_run
         logger.info("Phase7→Phase8 publishers: %s → %s", type(p7.in_process_publisher).__name__, getattr(p8_run, "__module__", type(p8_run).__name__))
-        wire_obs_learn(p7.in_process_publisher, p8_run)
+        wire_obs_learn(p7.in_process_publisher, partial(p8_run, container=p8_container))
         logger.info("Bridge Phase7→Phase8 wired.")
     except Exception:
         logger.warning("Phase7→Phase8 bridge not wired.", exc_info=True)

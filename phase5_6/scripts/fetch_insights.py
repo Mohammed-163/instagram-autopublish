@@ -10,19 +10,16 @@ import json
 import sys
 from datetime import datetime, timedelta, timezone
 
-import requests
 from sqlalchemy import inspect, text
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from lib import config
-from lib.error_handler import handle_unexpected
-from lib.gemini_client import GeminiClient
 from lib.instagram_client import InstagramClient, InstagramAPIError
 from lib.sheets_client import SheetsClient
-from lib.telegram_notifier import TelegramNotifier
 
 MILESTONES = (("1h", 1), ("2h", 2), ("6h", 6), ("24h", 24), ("3d", 72), ("7d", 168))
+MAX_SNAPSHOT_DELAY = timedelta(minutes=30)
 INSIGHTS_METRICS = ("reach", "saved", "likes", "comments", "shares", "views", "total_interactions")
 SUPPORTED_MEDIA_PRODUCT_TYPES = {"FEED", "REELS", "CAROUSEL_ALBUM"}
 
@@ -79,16 +76,16 @@ def ensure_snapshot_table(engine) -> None:
                 ))
 
 
-def _read_snapshots(engine, media_id: str) -> dict[str, dict]:
+def _read_snapshots(engine, media_id: str) -> set[str]:
     with engine.begin() as connection:
         rows = connection.execute(text(
             "SELECT snapshot_period FROM instagram_insight_snapshots WHERE media_id=:media_id"
         ), {"media_id": media_id}).all()
-    return {period: True for (period,) in rows}
+    return {period for (period,) in rows}
 
 
-def _save_snapshot(engine, row: dict, period: str, target_at: datetime,
-                   captured_at: datetime, metrics: dict) -> None:
+def _save_snapshot(session, row: dict, period: str, target_at: datetime,
+                   captured_at: datetime, metrics: dict) -> bool:
     values = {
         "media_id": str(row["media_id"]), "snapshot_period": period,
         "target_at": target_at, "published_at": _parse_datetime(row["published_at"]),
@@ -103,8 +100,7 @@ def _save_snapshot(engine, row: dict, period: str, target_at: datetime,
     for name in ("reach", "saved", "shares", "likes", "comments", "views", "total_interactions"):
         value = metrics.get(name)
         values[name] = int(value) if isinstance(value, (int, float)) and not isinstance(value, bool) else None
-    with engine.begin() as connection:
-        connection.execute(text("""
+    result = session.execute(text("""
             INSERT INTO instagram_insight_snapshots
             (media_id,snapshot_period,target_at,published_at,scheduled_time,captured_at,topic_slug,hook_line,
              ayah_key,ayah_text,iraqi_explanation,background_query,visual_style,music_file,metrics_json,
@@ -113,16 +109,15 @@ def _save_snapshot(engine, row: dict, period: str, target_at: datetime,
                     :hook_line,:ayah_key,:ayah_text,:iraqi_explanation,:background_query,:visual_style,:music_file,:metrics_json,
                     :reach,:saved,:shares,:likes,:comments,:views,:total_interactions)
             ON CONFLICT (media_id,snapshot_period) DO NOTHING
-        """), values)
+    """), values)
+    return result.rowcount == 1
 
 
-def _persist_learning(factory, row: dict, period: str, metrics: dict,
+def _persist_learning(session, row: dict, period: str, metrics: dict,
                       captured_at: datetime) -> None:
     """Persist period-specific signals: the weekly planner can compare like with like."""
     from phase8_learning.database.models import LearningObservationModel
 
-    LearningObservationModel.__table__.create(factory.engine, checkfirst=True)
-    session = factory.new_session()
     context = {
         "media_id": str(row["media_id"]), "snapshot_period": period,
         "captured_at": captured_at.isoformat(), "topic_slug": row.get("topic_slug", ""),
@@ -135,29 +130,22 @@ def _persist_learning(factory, row: dict, period: str, metrics: dict,
         "background_query": row.get("background_query", ""),
         "visual_style": row.get("visual_style", ""), "music_file": row.get("music_file", ""),
     }
-    try:
-        for name, value in metrics.items():
-            if isinstance(value, bool) or not isinstance(value, (int, float)):
-                continue
-            metric_name = f"{name}_{period}"
-            existing = session.query(LearningObservationModel).filter_by(
-                media_id=context["media_id"], metric_name=metric_name
-            ).order_by(LearningObservationModel.created_at.desc()).first()
-            if existing:
-                existing.metric_value = float(value)
-                existing.context = context
-            else:
-                session.add(LearningObservationModel(
-                    observation_id=f"{context['media_id']}:{period}:{name}",
-                    media_id=context["media_id"], subject_id=(row.get("topic_slug") or context["media_id"])[:255],
-                    metric_name=metric_name, metric_value=float(value), context=context,
-                ))
-        session.commit()
-    except Exception:
-        session.rollback()
-        raise
-    finally:
-        session.close()
+    for name, value in metrics.items():
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            continue
+        metric_name = f"{name}_{period}"
+        existing = session.query(LearningObservationModel).filter_by(
+            media_id=context["media_id"], metric_name=metric_name
+        ).order_by(LearningObservationModel.created_at.desc()).first()
+        if existing:
+            existing.metric_value = float(value)
+            existing.context = context
+        else:
+            session.add(LearningObservationModel(
+                observation_id=f"{context['media_id']}:{period}:{name}",
+                media_id=context["media_id"], subject_id=(row.get("topic_slug") or context["media_id"])[:255],
+                metric_name=metric_name, metric_value=float(value), context=context,
+            ))
 
 
 def fetch_media_insights(ig, media_id):
@@ -198,9 +186,7 @@ def _initialize_learning():
 
 
 def main():
-    config.check_required_env_vars(["GOOGLE_SHEET_ID", "IG_ACCESS_TOKEN", "IG_BUSINESS_ID",
-                                    "TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID"])
-    notifier = TelegramNotifier(config.require_env("TELEGRAM_BOT_TOKEN"), config.require_env("TELEGRAM_CHAT_ID"))
+    config.check_required_env_vars(["GOOGLE_SHEET_ID", "IG_ACCESS_TOKEN", "IG_BUSINESS_ID"])
     sheets = SheetsClient(config.load_sheets_service_account_json(), config.require_env("GOOGLE_SHEET_ID"))
     if sheets.is_paused():
         print("System is paused. Exiting.")
@@ -208,96 +194,76 @@ def main():
 
     ig = InstagramClient(config.require_env("IG_ACCESS_TOKEN"), config.require_env("IG_BUSINESS_ID"))
     factory = _initialize_learning()
-    gemini_keys = [config.optional_env(f"GEMINI_API_KEY_{i}") for i in (1, 2, 3)]
-    gemini = GeminiClient(gemini_keys) if any(gemini_keys) else None
-    now = datetime.now(timezone.utc)
-    daily_rows = sheets._ws(config.DAILY_LOG_TAB).get_all_records()  # noqa: SLF001
-    live_media = ig._request("GET", f"{ig.ig_business_id}/media", params={
-        "fields": "id,caption,timestamp,media_type,media_product_type", "limit": 100,
-    }).get("data", [])
-    media_by_id = {str(item.get("id")): item for item in live_media}
     fetched = 0
-
+    failed = 0
+    seen = set()
     try:
-        for row_index, original in enumerate(daily_rows, start=2):
-            if original.get("status") not in (config.STATUS_PUBLISHED, config.STATUS_CLEANED):
+        from phase8_learning.database.models import LearningObservationModel
+
+        LearningObservationModel.__table__.create(factory.engine, checkfirst=True)
+        daily_rows = sheets._ws(config.DAILY_LOG_TAB).get_all_records()  # noqa: SLF001
+        for row_index, row in enumerate(daily_rows, start=2):
+            if row.get("status") not in (config.STATUS_PUBLISHED, config.STATUS_CLEANED):
                 continue
-            if not original.get("media_id") or not original.get("published_at"):
+            published_at = _parse_datetime(row.get("published_at"))
+            media_id = str(row.get("media_id") or "").strip()
+            if not published_at or not media_id or media_id in seen:
                 continue
-            published_at = _parse_datetime(original["published_at"])
-            if published_at is None:
+            seen.add(media_id)
+            now = datetime.now(timezone.utc)
+            candidates = [
+                (period, published_at + timedelta(hours=hours))
+                for period, hours in MILESTONES
+                if published_at + timedelta(hours=hours) <= now
+                <= published_at + timedelta(hours=hours) + MAX_SNAPSHOT_DELAY
+            ]
+            if not candidates:
                 continue
-            media = media_by_id.get(str(original["media_id"]))
-            if not media:
-                topic = str(original.get("topic_slug") or "").casefold()
-                hook = str(original.get("hook_line") or "").casefold()
-                candidates = [item for item in live_media
-                              if (topic and topic in str(item.get("caption") or "").casefold())
-                              or (hook and hook in str(item.get("caption") or "").casefold())]
-                if len(candidates) == 1:
-                    media = candidates[0]
-            if not media:
-                continue
-            row = {**original, "media_id": str(media["id"])}
-            existing = _read_snapshots(factory.engine, row["media_id"])
-            due = [(period, hours, published_at + timedelta(hours=hours))
-                   for period, hours in MILESTONES
-                   if now >= published_at + timedelta(hours=hours) and period not in existing]
-            if not due:
-                continue
-            # One milestone per post per workflow run: if GitHub delays a run,
-            # do not pretend one current cumulative count was six historical readings.
-            due = due[:1]
-            metrics, media_type = fetch_media_insights(ig, row["media_id"])
-            if metrics is None:
-                print(f"Skipping unsupported carousel child {row['media_id']} ({media_type})")
-                continue
-            if not metrics:
-                raise RuntimeError(f"Instagram returned no usable insight metrics for {row['media_id']}; milestone left pending for retry.")
-            for period, hours, target_at in due:
+            period, target_at = candidates[0]
+            try:
+                if period in _read_snapshots(factory.engine, media_id):
+                    continue
+                metrics, media_type = fetch_media_insights(ig, media_id)
+                if metrics is None:
+                    print(f"Skipping unsupported media in row {row_index} ({media_type})")
+                    continue
                 captured_at = datetime.now(timezone.utc)
-                try:
-                    _persist_learning(factory, row, period, metrics, captured_at)
-                    _save_snapshot(factory.engine, row, period, target_at, captured_at, metrics)
-                    # The Sheet is a convenience mirror; Supabase and the
-                    # learning observations above are canonical. A Sheets API
-                    # outage must not invalidate an already-saved measurement.
-                    try:
-                        sheets.append_post_performance({
-                            "date": row.get("date", ""), "topic_slug": row.get("topic_slug", ""),
-                            "hook_line": row.get("hook_line", ""), "fact_line": row.get("fact_line", ""),
-                            "caption_arabic": row.get("caption_arabic", ""), "hashtags": row.get("hashtags", ""),
-                            "media_id": row["media_id"], "published_at": row.get("published_at", ""),
-                            "fetched_at": captured_at.isoformat(), "snapshot_period": period,
-                            "target_at": target_at.isoformat(),
-                            "reach": metrics.get("reach", ""), "saved": metrics.get("saved", ""),
-                            "shares": metrics.get("shares", ""), "likes": metrics.get("likes", ""),
-                            "comments": metrics.get("comments", ""), "views": metrics.get("views", ""),
-                            "ayah_key": row.get("ayah_key", ""), "ayah_text": row.get("ayah_text", ""),
-                            "iraqi_explanation": row.get("iraqi_explanation", ""),
-                            "background_query": row.get("background_query", ""),
-                            "music_file": row.get("music_file", ""), "visual_style": row.get("visual_style", ""),
-                        })
-                    except Exception as sheet_exc:
-                        print(
-                            f"WARNING: Supabase/learning saved {row['media_id']}/{period}, "
-                            f"but Post_Performance Sheet mirror failed: {sheet_exc}"
-                        )
-                    fetched += 1
-                    print(f"Saved {period} cumulative insights for {row['media_id']} at {captured_at.isoformat()}")
-                except Exception as exc:
-                    print(f"Retry next run: {row.get('topic_slug', row['media_id'])}/{period}: {exc}")
-                    raise
-    except (InstagramAPIError, requests.exceptions.Timeout, requests.exceptions.ConnectionError) as exc:
-        print(f"Transient Instagram/API error; due measurements will be retried: {exc}")
-    except Exception:
-        if gemini:
-            handle_unexpected(notifier, gemini, config.optional_env("GH_PAT"),
-                              config.optional_env("GH_REPO"), "scripts/fetch_insights.py",
-                              "scheduled cumulative insight collection", now.date().isoformat())
-        raise
+                if captured_at > target_at + MAX_SNAPSHOT_DELAY:
+                    continue
+                if not isinstance(metrics.get("reach"), (int, float)):
+                    raise RuntimeError("Instagram did not return reach")
+                row = {**row, "media_id": media_id}
+                with factory.new_session() as session, session.begin():
+                    if not _save_snapshot(session, row, period, target_at, captured_at, metrics):
+                        continue
+                    _persist_learning(session, row, period, metrics, captured_at)
+                fetched += 1
+            except Exception as exc:
+                failed += 1
+                print(f"Could not measure row {row_index}/{period}: {type(exc).__name__}")
+                continue
+            try:
+                sheets.append_post_performance({
+                    "date": row.get("date", ""), "topic_slug": row.get("topic_slug", ""),
+                    "hook_line": row.get("hook_line", ""), "fact_line": row.get("fact_line", ""),
+                    "caption_arabic": row.get("caption_arabic", ""), "hashtags": row.get("hashtags", ""),
+                    "media_id": row["media_id"], "published_at": row.get("published_at", ""),
+                    "fetched_at": captured_at.isoformat(), "snapshot_period": period,
+                    "target_at": target_at.isoformat(),
+                    "reach": metrics.get("reach", ""), "saved": metrics.get("saved", ""),
+                    "shares": metrics.get("shares", ""), "likes": metrics.get("likes", ""),
+                    "comments": metrics.get("comments", ""), "views": metrics.get("views", ""),
+                    "ayah_key": row.get("ayah_key", ""), "ayah_text": row.get("ayah_text", ""),
+                    "iraqi_explanation": row.get("iraqi_explanation", ""),
+                    "background_query": row.get("background_query", ""),
+                    "music_file": row.get("music_file", ""), "visual_style": row.get("visual_style", ""),
+                })
+            except Exception as exc:
+                print(f"Database saved row {row_index}/{period}; sheet mirror failed: {type(exc).__name__}")
     finally:
         factory.engine.dispose()
+    if failed:
+        raise SystemExit(f"{failed} due measurements failed; {fetched} saved.")
     print(f"Saved {fetched} milestone snapshot(s); schedule: 1h, 2h, 6h, 24h, 3d, 7d.")
 
 

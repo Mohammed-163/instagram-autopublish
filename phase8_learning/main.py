@@ -24,29 +24,37 @@ from typing import Iterable, List, Optional
 from phase8_learning.config.settings import Settings
 from phase8_learning.domain.knowledge import Knowledge
 from phase8_learning.events.events import ObservationRecorded
+from phase8_learning.events.publisher import InProcessEventPublisher
 from phase8_learning.infrastructure.container import Container
 
 
 def run(
     observations: Iterable[ObservationRecorded],
     settings: Optional[Settings] = None,
+    *,
+    container: Optional[Container] = None,
 ) -> List[Knowledge]:
     """
     Run one batch of ObservationRecorded events through the full
     Engine -> Service -> Repository pipeline and return the Knowledge
     objects that were created or updated.
     """
-    container = Container(settings=settings)
-    container.initialize_schema()
+    if container is None:
+        container = Container(settings=settings)
+        container.initialize_schema()
 
-    stack = container.build_stack()
+    pending = InProcessEventPublisher()
+    stack = container.build_stack(publisher=pending)
     try:
         candidates = stack.engine.process(observations)
         results = stack.service.process_candidates(list(candidates))
         stack.unit_of_work.commit()
-        return results
     except Exception:
         stack.unit_of_work.rollback()
         raise
     finally:
         stack.unit_of_work.__exit__(None, None, None)
+
+    for event in pending.published_events:
+        container.publisher.publish(event)
+    return results
