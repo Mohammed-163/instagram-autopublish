@@ -398,7 +398,8 @@ GitHub Actions runs.
 The weekly strategy reads the last 90 days of 24-hour Instagram snapshots from
 Supabase. A snapshot counts when its capture falls within 30 minutes after the
 target time. Late historical snapshots remain available for reporting. The strategy
-uses views and weighted engagement, and asks Gemini to reserve two of its ten
+uses weighted engagement and compares median views by posting hour over four
+weeks when there are enough samples. Gemini reserves two of its ten
 topics for exploring new angles. Google Sheets carries the plan to daily video
 generation, and Google Drive supplies the generated video to the publisher.
 

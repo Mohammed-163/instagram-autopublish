@@ -77,3 +77,19 @@ def test_snapshot_rolls_back_when_learning_write_fails():
             raise RuntimeError("learning failed")
     assert fetch_insights._read_snapshots(engine, "atomic-post") == set()
     engine.dispose()
+
+
+def test_posting_hours_use_median_views_with_minimum_samples():
+    week_start = datetime(2026, 11, 22, tzinfo=timezone.utc)
+    posts = []
+    for utc_hour, views in ((10, [2000, 2100, 2200]), (15, [600, 650, 50000]), (17, [10000])):
+        published = (week_start - timedelta(days=3)).replace(hour=utc_hour)
+        posts.extend(
+            {"published_at": published.isoformat(), "views": count, "reach": 100,
+             "score": 0.1, "measured_24h": True}
+            for count in views
+        )
+    policy = monthly_task.choose_publishing_times(posts, week_start.date())
+    assert policy["single"] == "13:00"
+    assert policy["double"] == ["13:00", "18:00"]
+    assert policy["hour_stats"][18]["median_views"] == 650

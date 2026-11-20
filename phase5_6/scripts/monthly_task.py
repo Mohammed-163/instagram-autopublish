@@ -6,6 +6,7 @@ import json
 import sys
 from collections import defaultdict
 from datetime import date, datetime, timedelta, timezone
+from statistics import median
 
 import pytz
 
@@ -141,38 +142,42 @@ def _parse_local_datetime(value: object) -> datetime | None:
 
 
 def choose_publishing_times(posts: list[dict], current_week_start: date) -> dict:
-    """Learn time slots from mature 24-hour data in the immediately prior week."""
-    previous_start = current_week_start - timedelta(days=7)
-    hours: dict[int, list[tuple[float, int]]] = defaultdict(list)
-    observed_posts = 0
+    """Compare Baghdad posting hours using recent, comparable snapshots."""
+    previous_start = current_week_start - timedelta(weeks=4)
+    hours: dict[int, list[dict]] = defaultdict(list)
     for post in posts:
-        if not post.get("measured_24h"):
+        if not post.get("measured_24h") or (post.get("reach") or 0) <= 0:
             continue
         published = _parse_local_datetime(post.get("published_at"))
         if published is None or not (previous_start <= published.date() < current_week_start):
             continue
-        reach = int(post.get("reach") or 0)
-        if reach <= 0:
-            continue
-        observed_posts += 1
-        hours[published.hour].append((post["score"], reach))
+        hours[published.hour].append(post)
 
-    qualified = {
-        hour: {"posts": len(values), "score": sum(score for score, _ in values) / len(values),
-               "reach": sum(reach for _, reach in values)}
-        for hour, values in hours.items() if len(values) >= MIN_POSTS_PER_HOUR
-    }
-    if sum(item["posts"] for item in qualified.values()) < 6 or len(qualified) < 2:
+    observed_posts = sum(len(values) for values in hours.values())
+    qualified = {}
+    for hour, values in hours.items():
+        if len(values) < MIN_POSTS_PER_HOUR:
+            continue
+        views = [post["views"] for post in values if post.get("views") is not None]
+        qualified[hour] = {
+            "posts": len(values),
+            "score": sum(post["score"] for post in values) / len(values),
+            "reach": sum(post["reach"] for post in values),
+            "median_views": median(views) if len(views) >= MIN_POSTS_PER_HOUR else None,
+        }
+    if len(qualified) < 2:
         return {"source": "standard_fallback", "sample_size": observed_posts,
                 "single": DEFAULT_SINGLE_TIME, "double": list(DEFAULT_DOUBLE_TIMES), "hour_stats": qualified}
 
-    ranked = sorted(qualified, key=lambda hour: (qualified[hour]["score"], qualified[hour]["reach"], -hour), reverse=True)
-    best_single = f"{ranked[0]:02d}:00"
+    compare_views = all(item["median_views"] is not None for item in qualified.values())
+    ranked = sorted(qualified, key=lambda hour: (
+        qualified[hour]["median_views"] if compare_views else qualified[hour]["score"],
+        qualified[hour]["score"], qualified[hour]["reach"], -hour,
+    ), reverse=True)
     best_pair = sorted(ranked[:2])
-    return {"source": "previous_week_24h_performance",
-            "sample_size": observed_posts,
-            "single": best_single, "double": [f"{hour:02d}:00" for hour in best_pair],
-            "hour_stats": qualified}
+    return {"source": "last_four_weeks_24h_performance", "sample_size": observed_posts,
+            "single": f"{ranked[0]:02d}:00",
+            "double": [f"{hour:02d}:00" for hour in best_pair], "hour_stats": qualified}
 
 
 def _build_rows(posts: list[dict], week_start: date, time_policy: dict | None = None,
