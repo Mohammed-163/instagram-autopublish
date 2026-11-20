@@ -1,0 +1,6 @@
+/backups/
+__pycache__/
+*.pyc
+/phase*_test.db
+/phase5_6_ci.db
+/phase7_observation.db

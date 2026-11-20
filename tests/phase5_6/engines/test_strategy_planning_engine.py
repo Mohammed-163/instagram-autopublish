@@ -3,7 +3,6 @@ Tests for StrategyPlanningEngine (Phase 4 Part 1, items 1, 2, 6, 7, 10).
 Planning-only: verifies the engine never executes a publish decision, only
 persists StrategyCandidate rows and emits StrategyGenerated / WeeklyStrategyCompleted.
 """
-import itertools
 import uuid
 from datetime import date
 from types import SimpleNamespace
@@ -32,19 +31,17 @@ def mock_strategy_service():
 
 
 @pytest.fixture
-def mock_knowledge_service():
-    svc = Mock()
-    svc.get_active_rules.return_value = []
-    svc.get_top_topic_names.return_value = ["Topic A", "Topic B", "Topic C", "Topic D", "Topic E", "Topic F", "Topic G"]
-    return svc
-
-
-@pytest.fixture
-def mock_hook_service():
-    svc = Mock()
-    svc.get_best_hook_type_for_category.return_value = None
-    svc.get_statistic.return_value = None
-    return svc
+def mock_opportunity_service():
+    service = Mock()
+    service.get_by_status.return_value = [SimpleNamespace(
+        id=uuid.uuid4(),
+        evidence={"categories": ["Hope", "Patience"], "raw_data": {"hook_type": "evidence_hook"}},
+        related_entities=[f"Topic {index}" for index in range(10)],
+        opportunity_score=0.85,
+        confidence=0.9,
+        expected_gain=0.8,
+    )]
+    return service
 
 
 @pytest.fixture
@@ -53,12 +50,11 @@ def mock_health_service():
 
 
 @pytest.fixture
-def test_engine(mock_bus, mock_strategy_service, mock_knowledge_service, mock_hook_service, mock_health_service):
+def test_engine(mock_bus, mock_strategy_service, mock_opportunity_service, mock_health_service):
     return StrategyPlanningEngine(
         event_bus=mock_bus,
         strategy_service=mock_strategy_service,
-        knowledge_service=mock_knowledge_service,
-        hook_service=mock_hook_service,
+        opportunity_service=mock_opportunity_service,
         health_service=mock_health_service,
     )
 
@@ -117,20 +113,15 @@ def test_each_candidate_is_fully_explainable(test_engine, mock_strategy_service)
         assert kwargs["based_on"]
 
 
-def test_exploitation_used_when_proven_hook_rule_exists(
-    test_engine, mock_strategy_service, mock_hook_service
+def test_exploitation_uses_validated_opportunity(
+    test_engine, mock_strategy_service, mock_opportunity_service
 ):
-    rule = SimpleNamespace(
-        id=uuid.uuid4(), hook_type="curiosity", confidence=0.9,
-        avg_success_score=0.85, success_level="high", sample_size=10,
-    )
-    mock_hook_service.get_best_hook_type_for_category.return_value = rule
-
     test_engine.generate_weekly_strategy(target_posts=7)
 
     calls = mock_strategy_service.add_candidate.call_args_list
     exploitation_reason_calls = [c for c in calls if "Exploitation" in c.kwargs["reason"]]
-    assert exploitation_reason_calls, "expected at least one slot to exploit the proven hook rule"
+    assert exploitation_reason_calls, "expected at least one slot to use the validated opportunity"
+    mock_opportunity_service.get_by_status.assert_called_once_with("Validated")
     for c in exploitation_reason_calls:
         assert c.kwargs["is_experiment"] is False
 

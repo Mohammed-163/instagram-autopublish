@@ -49,7 +49,7 @@ class Container:
         apply migrations/ instead."""
         self.connection_factory.create_all()
 
-    def build_stack(self) -> WiredLearningStack:
+    def build_stack(self, publisher: EventPublisher | None = None) -> WiredLearningStack:
         """
         Build a fully wired Repository -> Service -> Engine stack, scoped
         to a fresh UnitOfWork. The caller is responsible for entering and
@@ -63,7 +63,7 @@ class Container:
 
         service = LearningService(
             repository=repository,
-            publisher=self.publisher,
+            publisher=publisher if publisher is not None else self.publisher,
             config=LearningServiceConfig(
                 fingerprint_version=self.settings.fingerprint_version,
                 engine_version=self.settings.engine_version,

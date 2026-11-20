@@ -4,18 +4,15 @@ Backup System
 Backs up:
   1. PostgreSQL/Supabase databases for Phases 7-10 (pg_dump or SQLite copy)
   2. The logs/ directory (compressed)
-  3. Key config files (.env.example, migrations/)
-  4. Gemini rotation state
+  3. Gemini rotation state
 
 Retention: BACKUP_RETENTION_DAYS (default 30 days)
-Storage: GitHub repo /backups/ via Contents API  +  local /backups/ dir
+Storage: local backup directory. The weekly workflow uploads database exports to private Drive.
 """
 from __future__ import annotations
 
-import base64
 import gzip
 import hashlib
-import json
 import logging
 import os
 import shutil
@@ -45,35 +42,6 @@ def _checksum(path: Path) -> str:
         for chunk in iter(lambda: f.read(65536), b""):
             h.update(chunk)
     return h.hexdigest()
-
-
-# ── GitHub upload ──────────────────────────────────────────────────────────
-def _commit_to_github(path_in_repo: str, content_bytes: bytes, message: str) -> bool:
-    token = os.environ.get("GH_PAT", "")
-    repo  = os.environ.get("GH_REPO", "")
-    if not token or not repo:
-        logger.warning("GH_PAT / GH_REPO not set — skipping GitHub backup upload")
-        return False
-
-    headers = {"Authorization": f"token {token}", "Accept": "application/vnd.github+json"}
-    api = f"https://api.github.com/repos/{repo}/contents/{path_in_repo}"
-
-    existing = requests.get(api, headers=headers, timeout=20)
-    sha = existing.json().get("sha") if existing.ok else None
-
-    body: dict = {
-        "message": message,
-        "content": base64.b64encode(content_bytes).decode(),
-    }
-    if sha:
-        body["sha"] = sha
-
-    resp = requests.put(api, headers=headers, json=body, timeout=30)
-    if resp.status_code in (200, 201):
-        logger.info("GitHub backup uploaded: %s", path_in_repo)
-        return True
-    logger.error("GitHub backup upload failed %s: %s %s", path_in_repo, resp.status_code, resp.text[:200])
-    return False
 
 
 # ── Database backup ────────────────────────────────────────────────────────
@@ -106,7 +74,7 @@ def _pg_dump(db_url: str, out_path: Path) -> bool:
         return False
 
 
-def backup_databases(tag: str) -> list[str]:
+def backup_databases(tag: str, *, directory: Path = BACKUP_DIR) -> list[str]:
     backed_up = []
     phase_map = {
         "phase7":  "OBSERVATION_DB_DSN",
@@ -114,7 +82,7 @@ def backup_databases(tag: str) -> list[str]:
         "phase9":  "KCL_DATABASE_URL",
         "phase10": "P10_DATABASE_URL",
     }
-    BACKUP_DIR.mkdir(parents=True, exist_ok=True)
+    directory.mkdir(parents=True, exist_ok=True)
 
     for label, env_var in phase_map.items():
         url = os.environ.get(env_var, "")
@@ -128,29 +96,21 @@ def backup_databases(tag: str) -> list[str]:
             if not os.path.isabs(db_file):
                 db_file = str(PROJECT_ROOT / db_file)
             if not os.path.exists(db_file):
-                logger.info("SQLite file not found, skipping: %s", db_file)
-                continue
+                raise RuntimeError(f"SQLite database missing for {label}")
             out_name = f"{label}_{tag}.db.gz"
-            out_path = BACKUP_DIR / out_name
+            out_path = directory / out_name
             with open(db_file, "rb") as fin, gzip.open(out_path, "wb") as fout:
                 shutil.copyfileobj(fin, fout)
             logger.info("SQLite backup: %s → %s", db_file, out_path)
         else:
             # PostgreSQL pg_dump
             out_name = f"{label}_{tag}.pgdump.gz"
-            out_path = BACKUP_DIR / out_name
+            out_path = directory / out_name
             if not _pg_dump(url, out_path):
-                logger.warning("Skipped PostgreSQL backup for %s", label)
-                continue
+                raise RuntimeError(f"Database dump failed for {label}")
 
         checksum = _checksum(out_path)
         logger.info("Backup checksum (%s): %s", out_name, checksum)
-        with open(out_path, "rb") as f:
-            _commit_to_github(
-                f"backups/db/{out_name}",
-                f.read(),
-                f"backup: {label} database {tag} sha256={checksum[:12]}",
-            )
         backed_up.append(str(out_path))
     return backed_up
 
@@ -167,11 +127,6 @@ def backup_rotation_state(tag: str) -> Optional[str]:
     out_path = BACKUP_DIR / out_name
     with open(state_file, "rb") as fin, gzip.open(out_path, "wb") as fout:
         shutil.copyfileobj(fin, fout)
-    with open(out_path, "rb") as f:
-        _commit_to_github(
-            f"backups/state/{out_name}", f.read(),
-            f"backup: gemini rotation state {tag}",
-        )
     logger.info("Rotation state backed up: %s", out_path)
     return str(out_path)
 
@@ -189,11 +144,6 @@ def backup_logs(tag: str) -> Optional[str]:
     with tarfile.open(out_path, "w:gz") as tar:
         for log_file in sorted(log_dir.glob("*.log")):
             tar.add(log_file, arcname=log_file.name)
-    with open(out_path, "rb") as f:
-        _commit_to_github(
-            f"backups/logs/{out_name}", f.read(),
-            f"backup: logs {tag}",
-        )
     logger.info("Logs backed up: %s", out_path)
     return str(out_path)
 
@@ -222,7 +172,7 @@ def _notify_telegram(message: str) -> None:
             timeout=15,
         )
     except Exception as e:
-        logger.warning("Telegram notification failed: %s", e)
+        logger.warning("Telegram notification failed: %s", type(e).__name__)
 
 
 # ── Main entry point ───────────────────────────────────────────────────────

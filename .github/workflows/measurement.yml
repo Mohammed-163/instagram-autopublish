@@ -47,7 +47,7 @@ jobs:
           LEARNING_LAYER_DATABASE_URL:       ${{ secrets.DATABASE_URL }}
           OBSERVATION_DB_DSN:                ${{ secrets.DATABASE_URL }}
           DRY_RUN:                           ${{ github.event.inputs.dry_run || 'false' }}
-        run: python phase5_6/scripts/daily_generate.py
+        run: python -m phase5_6.scripts.daily_generate
 
       - name: Notify failure
         if: failure()

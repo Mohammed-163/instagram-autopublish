@@ -551,15 +551,10 @@ class GeminiRotationEngine:
                 health.record_failure(err_type, backoff)
                 _save_state(self._state_file, self._health)
                 logger.warning(
-                    "✗ key#%d model=%s err=%s attempt=%d cooldown=%.0fs — %s",
-                    ki + 1, model_name, err_type, attempt, backoff, exc,
+                    "✗ key#%d model=%s err=%s attempt=%d cooldown=%.0fs",
+                    ki + 1, model_name, err_type, attempt, backoff,
                 )
-
-                if attempt < max_retries_per_pair:
-                    logger.info("Sleeping %.0fs before retry…", backoff)
-                    time.sleep(backoff)
-                # After the failure is recorded the pair is in cooldown;
-                # _select_best_pair will skip it next iteration.
+                # Re-select immediately; the failed pair is already cooling down.
 
         raise AllCombinationsExhaustedError(
             f"All key×model combinations failed or exhausted: "

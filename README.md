@@ -392,3 +392,21 @@ GitHub Actions runs.
 | `ROTATION_MODELS` | `gemini-3.1-flash-lite,...` | Rotation engine tiebreaker order **only** |
 | `GEMINI_MODEL_ROTATION` | *(alias for `ROTATION_MODELS`)* | Legacy alias — accepted for backwards compat |
 | `GEMINI_STATE_FILE` | `./gemini_rotation_state.json` | Path to persistent rotation state |
+
+### Performance learning and backups
+
+The weekly strategy reads the last 90 days of 24-hour Instagram snapshots from
+Supabase. A snapshot counts when its capture falls within 30 minutes after the
+target time. Late historical snapshots remain available for reporting. The strategy
+uses weighted engagement and compares median views by posting hour over four
+weeks when there are enough samples. Gemini reserves two of its ten
+topics for exploring new angles. Google Sheets carries the plan to daily video
+generation, and Google Drive supplies the generated video to the publisher.
+
+Run the insights job at least every 15 minutes. For GitHub Actions, retain the
+external dispatch for `run-instagram-insights`; for the standalone scheduler,
+the default is every 15 minutes.
+
+Weekly backups use the existing Drive OAuth secret and an owner-only folder
+named `instagram-autopublish-private-backups` in that account's My Drive. The
+backup job checks folder permissions before uploading. Keep this folder private.

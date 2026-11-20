@@ -188,8 +188,8 @@ class TestConfigParsing:
         import lib.config as cfg
         importlib.reload(cfg)
         # DEFAULT_TEXT_MODEL must stay at its own default, not change with ROTATION_MODELS
-        assert cfg.DEFAULT_TEXT_MODEL == "gemini-3.5-flash-lite"
-        assert cfg.GEMINI_MODEL_NAME == "gemini-3.5-flash-lite"
+        assert cfg.DEFAULT_TEXT_MODEL == "gemini-3.8-flash"
+        assert cfg.GEMINI_MODEL_NAME == "gemini-3.8-flash"
         # Changing ROTATION_MODELS must not affect the text model
         assert cfg.GEMINI_MODEL_NAME != cfg.ROTATION_MODELS[0], (
             "GEMINI_MODEL_NAME must NOT be derived from ROTATION_MODELS[0]"
@@ -911,10 +911,10 @@ class TestConfigurationIndependence:
             ROTATION_MODELS="gemini-3.6-flash,gemini-3.5-flash,gemini-3.1-flash-lite,gemini-3.5-flash-lite",
             DEFAULT_TEXT_MODEL=None,
         )
-        assert cfg.DEFAULT_TEXT_MODEL == "gemini-3.5-flash-lite", (
+        assert cfg.DEFAULT_TEXT_MODEL == "gemini-3.8-flash", (
             "DEFAULT_TEXT_MODEL changed when ROTATION_MODELS changed — must be independent"
         )
-        assert cfg.GEMINI_MODEL_NAME == "gemini-3.5-flash-lite"
+        assert cfg.GEMINI_MODEL_NAME == "gemini-3.8-flash"
 
     def test_changing_rotation_models_does_not_change_image_vetting_model(self, monkeypatch):
         """Rule 2: ROTATION_MODELS must NEVER change IMAGE_VETTING_MODEL."""
@@ -968,12 +968,12 @@ class TestConfigurationIndependence:
         """All four variables may be set to different values simultaneously."""
         cfg = self._reload_config(
             monkeypatch,
-            DEFAULT_TEXT_MODEL="gemini-3.5-flash-lite",
+            DEFAULT_TEXT_MODEL="gemini-3.8-flash",
             IMAGE_VETTING_MODEL="gemini-3.5-flash-lite",
             LEARNING_MODEL="gemini-3.5-flash",
             ROTATION_MODELS="gemini-3.1-flash-lite,gemini-3.5-flash-lite,gemini-3.5-flash,gemini-3.6-flash",
         )
-        assert cfg.DEFAULT_TEXT_MODEL == "gemini-3.5-flash-lite"
+        assert cfg.DEFAULT_TEXT_MODEL == "gemini-3.8-flash"
         assert cfg.IMAGE_VETTING_MODEL == "gemini-3.5-flash-lite"
         assert cfg.LEARNING_MODEL == "gemini-3.5-flash"
         assert cfg.ROTATION_MODELS == [
@@ -991,7 +991,7 @@ class TestConfigurationIndependence:
         assert cfg.ROTATION_MODELS == ["gemini-3.6-flash", "gemini-3.5-flash"]
         assert cfg.GEMINI_MODEL_ROTATION == ["gemini-3.6-flash", "gemini-3.5-flash"]
         # Default text model must be unchanged
-        assert cfg.DEFAULT_TEXT_MODEL == "gemini-3.5-flash-lite"
+        assert cfg.DEFAULT_TEXT_MODEL == "gemini-3.8-flash"
 
 
 # ══════════════════════════════════════════════════════════════════════════════

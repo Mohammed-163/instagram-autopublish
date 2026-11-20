@@ -13,7 +13,6 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from lib import config
 from lib.drive_client import DriveClient
 from lib.error_handler import handle_unexpected
-from lib.gemini_client import GeminiClient
 from lib.sheets_client import SheetsClient
 from lib.telegram_notifier import TelegramNotifier
 
@@ -34,10 +33,6 @@ def main():
         return
 
     drive = DriveClient(config.load_drive_oauth_token_json(), config.require_env("GOOGLE_DRIVE_FOLDER_ID"))
-    gemini_keys = [config.optional_env("GEMINI_API_KEY_1"), config.optional_env("GEMINI_API_KEY_2"), config.optional_env("GEMINI_API_KEY_3")]
-    gemini = GeminiClient(gemini_keys) if any(gemini_keys) else None
-    date_str = datetime.utcnow().strftime("%Y-%m-%d")
-
     due_for_cleanup = sheets.get_published_for_cleanup()
     if not due_for_cleanup:
         print("Nothing to clean up right now.")
@@ -56,17 +51,7 @@ def main():
         except (requests.exceptions.Timeout, requests.exceptions.ConnectionError) as e:
             print(f"⚠️ Transient network error cleaning up {row.get('topic_slug')}, will retry next run: {e}")
         except Exception:
-            if gemini:
-                handle_unexpected(
-                    notifier, gemini,
-                    config.optional_env("GH_PAT"), config.optional_env("GH_REPO"),
-                    "scripts/cleanup.py", f"cleanup loop, row {row_index}: {row.get('topic_slug', 'unknown')}", date_str,
-                )
-            else:
-                notifier.alert_critical(
-                    f"فشل حذف ملف من Drive (بدون مفاتيح Gemini للتشخيص الآلي): {row.get('topic_slug', 'unknown')}",
-                    "لم يتم إعداد GEMINI_API_KEY_1 كسر — تعذّر إنشاء اقتراح إصلاح آلي.",
-                )
+            handle_unexpected(notifier, "phase5_6/scripts/cleanup.py")
 
     print(f"Cleaned up {cleaned} file(s).")
 

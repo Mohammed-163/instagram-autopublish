@@ -78,7 +78,9 @@ def _mock_genai_sdk(generate_content_return=None, generate_content_side_effect=N
         "google.genai":       mock_genai,
         "google.genai.types": mock_types,
     }
-    with patch.dict(sys.modules, extra):
+    import google
+
+    with patch.dict(sys.modules, extra), patch.object(google, "genai", mock_genai, create=True):
         yield mock_client_instance   # yield the inner client so tests can inspect calls
 
 
@@ -234,99 +236,13 @@ class TestErrorHandler:
         importlib.reload(eh)
         return eh
 
-    # ── 5. Original traceback is preserved when the PR mechanism itself fails ─
-
-    def test_original_traceback_preserved_when_pr_fails(self):
-        """The original error must appear in the Telegram alert even when
-        create_fix_pr() raises.  The PR-error detail must also be present
-        (not just str(exc) which gave the useless "'object'" message)."""
+    def test_unexpected_error_keeps_secrets_and_model_output_private(self):
         eh = self._eh()
-
-        mock_notifier = MagicMock()
-        mock_gemini   = MagicMock()
-        mock_gemini.diagnose_workflow_error.return_value = "some diagnosis"
-
-        def _failing_create_fix_pr(*_a, **_kw):
-            raise RuntimeError("GitHub API is down")
-
-        # Simulate being called from inside an active except block
+        notifier = MagicMock()
         try:
-            raise ValueError("the real original error from the pipeline")
+            raise ValueError("secret connection detail")
         except ValueError:
-            with patch.object(eh, "create_fix_pr", side_effect=_failing_create_fix_pr):
-                eh.handle_unexpected(
-                    mock_notifier, mock_gemini,
-                    "fake-pat", "owner/repo",
-                    "scripts/daily_generate.py", "some snippet", "2025-01-01",
-                )
-
-        mock_notifier.alert_critical.assert_called_once()
-        _title, body = mock_notifier.alert_critical.call_args[0]
-
-        # Original pipeline error must survive
-        assert "ValueError" in body or "real original error" in body, (
-            f"Original traceback missing from alert body:\n{body}"
-        )
-        # PR-mechanism error section must be present AND must be a full
-        # traceback (containing "Traceback"), not just the bare str(exc).
-        # The old code used f"...{pr_error}" which gave "'object'" for
-        # non-string exceptions; the new code uses traceback.format_exc().
-        assert "\u062e\u0637\u0623 \u0622\u0644\u064a\u0629 PR" in body, (   # "خطأ آلية PR"
-            f"PR error section header missing from alert body:\n{body}"
-        )
-        pr_section = body.split("\u062e\u0637\u0623 \u0622\u0644\u064a\u0629 PR")[-1]
-        assert "Traceback" in pr_section, (
-            f"PR error section must be a full traceback, not just str(exc).\n"
-            f"Got:\n{pr_section}"
-        )
-
-    # ── 6. Non-string diagnosis never crashes create_fix_pr ──────────────────
-
-    def test_non_string_diagnosis_does_not_crash_pr_mechanism(self):
-        """If diagnose_workflow_error() leaks a non-string SDK wrapper object,
-        _coerce_diagnosis_to_str must convert it safely so .encode() never
-        raises AttributeError."""
-        eh = self._eh()
-
-        class FakeSdkObject:
-            def __repr__(self):
-                return "<FakeSdkObject content=...>"
-
-        result = eh._coerce_diagnosis_to_str(FakeSdkObject(), "original error log")
-
-        assert isinstance(result, str), "Must always return str"
-        assert result.strip(), "Result must not be empty"
-        assert "FakeSdkObject" in result, (
-            f"Type info must appear for debugging: {result!r}"
-        )
-        assert "original error log" in result, (
-            f"Original error must be embedded: {result!r}"
-        )
-        # Must be encodable — this was the crashing line in production
-        result.encode("utf-8")   # must not raise
-
-    # ── 7. None diagnosis produces usable placeholder ─────────────────────────
-
-    def test_none_diagnosis_produces_placeholder_with_original_error(self):
-        """None from diagnose_workflow_error must not crash .encode()."""
-        eh = self._eh()
-
-        result = eh._coerce_diagnosis_to_str(None, "KeyError: 'pixabay_query'")
-
-        assert isinstance(result, str)
-        assert result.strip()
-        assert "pixabay_query" in result, (
-            f"Original error must be embedded when diagnosis is None: {result!r}"
-        )
-        result.encode("utf-8")   # must not raise
-
-    # ── 8. Valid string diagnosis passes through unchanged ────────────────────
-
-    def test_valid_string_diagnosis_passes_through_unchanged(self):
-        """A normal non-empty str must come back byte-for-byte identical."""
-        eh = self._eh()
-
-        diagnosis = "Fix: add pixabay_query to the Gemini prompt."
-        result    = eh._coerce_diagnosis_to_str(diagnosis, "irrelevant")
-
-        assert result == diagnosis
+            eh.handle_unexpected(notifier, "scripts/publish.py")
+        notifier.alert_critical.assert_called_once()
+        _, body = notifier.alert_critical.call_args.args
+        assert body == "scripts/publish.py: ValueError"

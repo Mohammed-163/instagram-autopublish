@@ -8,13 +8,9 @@ import logging
 from dataclasses import dataclass
 from datetime import datetime
 
-import requests
-
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from lib import config
-from lib.error_handler import CriticalError, handle_unexpected
-from lib.gemini_client import GeminiClient
 from lib.instagram_client import InstagramClient, InstagramAPIError
 from lib.drive_client import DriveClient
 from lib.sheets_client import SheetsClient
@@ -49,6 +45,16 @@ def main():
         print("System is paused. Exiting.")
         return
 
+    # Surface any row that's been reserved too long without confirming —
+    # these are exactly the cases that used to silently duplicate.
+    stale = sheets.get_stale_publishing_rows(config.STALE_PUBLISHING_MINUTES)
+    for row_index, row in stale:
+        notifier.alert_critical(
+            f"⏳ منشور عالق بحالة 'publishing' منذ أكثر من {config.STALE_PUBLISHING_MINUTES} دقيقة: {row.get('topic_slug')}",
+            f"تحقق يدوياً هل نُشر فعلاً على انستغرام قبل أي إجراء (الصف رقم {row_index}). "
+            f"لن يُعاد نشره تلقائياً لتفادي التكرار.",
+        )
+
     ig_token = config.require_env("IG_ACCESS_TOKEN")
     ig_business_id = config.require_env("IG_BUSINESS_ID")
     ig = InstagramClient(ig_token, ig_business_id)
@@ -68,11 +74,9 @@ def main():
         return
 
     drive = DriveClient(config.load_drive_oauth_token_json(), config.require_env("GOOGLE_DRIVE_FOLDER_ID"))
-    gemini_keys = [config.optional_env("GEMINI_API_KEY_1"), config.optional_env("GEMINI_API_KEY_2"), config.optional_env("GEMINI_API_KEY_3")]
-    gemini = GeminiClient(gemini_keys) if any(gemini_keys) else None
-    date_str = datetime.utcnow().strftime("%Y-%m-%d")
-
+    failed = 0
     for row_index, row in due_posts:
+        publish_attempted = False
         try:
             # Reserve this row FIRST, before touching the Instagram API.
             # This is the critical ordering fix: previously the row was only
@@ -92,7 +96,8 @@ def main():
                 # Couldn't even reserve it — do NOT call Instagram. Skip this
                 # row this run; it's still "ready" so it'll be retried next
                 # run once whatever's wrong with Sheets clears up.
-                print(f"⚠️ Could not reserve {row.get('topic_slug')} for publishing, skipping this run: {e}")
+                print(f"⚠️ Could not reserve {row.get('topic_slug')} for publishing, skipping this run: {type(e).__name__}")
+                failed += 1
                 continue
 
             public_url = drive.get_public_download_url(row["drive_file_id"])
@@ -106,7 +111,10 @@ def main():
             hashtags = row.get("hashtags", "")
             full_caption = f"{caption}\n\n{hashtags}".strip()
 
-            media_id = ig.publish_reel(public_url, full_caption)
+            container_id = ig.create_reel_container(public_url, full_caption)
+            ig.wait_for_container(container_id)
+            publish_attempted = True
+            media_id = ig.publish_container(container_id)
             published_at = datetime.utcnow().isoformat()
 
             try:
@@ -128,8 +136,9 @@ def main():
                 notifier.alert_critical(
                     f"⚠️ نُشر المنشور {row.get('topic_slug')} على انستغرام بنجاح (media_id={media_id}) "
                     f"لكن فشل تحديث الشيت بعدها",
-                    f"حدّث يدوياً: status=published, published_at, media_id={media_id} للصف رقم {row_index}. الخطأ: {e}",
+                    f"حدّث يدوياً: status=published, published_at, media_id={media_id} للصف رقم {row_index}. الخطأ: {type(e).__name__}",
                 )
+                failed += 1
                 continue
 
             try:
@@ -156,51 +165,24 @@ def main():
 
             print(f"✓ Published post {row.get('topic_slug')} -> media_id={media_id}")
 
-        except InstagramAPIError as e:
-            # Known, external failure category — plain alert, no auto-fix attempt.
-            # Roll the reservation back to "ready" since Instagram was never
-            # actually called successfully, so the next run can retry it.
-            try:
-                sheets.update_row_fields(
-                    config.DAILY_LOG_TAB, row_index, {"status": config.STATUS_READY, "reserved_at": ""},
-                    verify_field="topic_slug", verify_value=row.get("topic_slug"),
-                )
-            except Exception:
-                pass
+        except Exception as exc:
+            failed += 1
+            if not publish_attempted:
+                try:
+                    sheets.update_row_fields(
+                        config.DAILY_LOG_TAB, row_index,
+                        {"status": config.STATUS_READY, "reserved_at": ""},
+                        verify_field="topic_slug", verify_value=row.get("topic_slug"),
+                    )
+                except Exception:
+                    logger.warning("Could not release publication reservation for row %s", row_index)
             notifier.alert_critical(
-                f"فشل نشر منشور: {row.get('topic_slug', 'unknown')}",
-                str(e),
+                f"فشل نشر الصف {row_index}",
+                ("تحقق من حساب Instagram قبل إعادة المحاولة. " if publish_attempted else "")
+                + type(exc).__name__,
             )
-        except (requests.exceptions.Timeout, requests.exceptions.ConnectionError) as e:
-            # Transient network failure while calling Instagram. We don't
-            # know for certain whether the post went through, so — unlike
-            # before — we do NOT roll back to "ready" here; that would risk
-            # a duplicate if it actually succeeded. It stays "publishing"
-            # and will surface via the stale-row check if it's really stuck.
-            print(f"⚠️ Transient network error publishing {row.get('topic_slug')}, left as 'publishing' for manual check: {e}")
-        except Exception:
-            # Anything unanticipated — route through Gemini diagnosis + PR flow.
-            if gemini:
-                handle_unexpected(
-                    notifier, gemini,
-                    config.optional_env("GH_PAT"), config.optional_env("GH_REPO"),
-                    "scripts/publish.py", f"publish loop, row {row_index}: {row.get('topic_slug', 'unknown')}", date_str,
-                )
-            else:
-                notifier.alert_critical(
-                    f"خطأ غير متوقع أثناء النشر (بدون مفاتيح Gemini للتشخيص الآلي): {row.get('topic_slug', 'unknown')}",
-                    "لم يتم إعداد GEMINI_API_KEY_1 كسر — تعذّر إنشاء اقتراح إصلاح آلي.",
-                )
-
-    # Surface any row that's been reserved too long without confirming —
-    # these are exactly the cases that used to silently duplicate.
-    stale = sheets.get_stale_publishing_rows(config.STALE_PUBLISHING_MINUTES)
-    for row_index, row in stale:
-        notifier.alert_critical(
-            f"⏳ منشور عالق بحالة 'publishing' منذ أكثر من {config.STALE_PUBLISHING_MINUTES} دقيقة: {row.get('topic_slug')}",
-            f"تحقق يدوياً هل نُشر فعلاً على انستغرام قبل أي إجراء (الصف رقم {row_index}). "
-            f"لن يُعاد نشره تلقائياً لتفادي التكرار.",
-        )
+    if failed:
+        raise SystemExit(f"{failed}/{len(due_posts)} due publications did not complete.")
 
 
 if __name__ == "__main__":

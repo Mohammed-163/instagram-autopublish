@@ -15,8 +15,8 @@ if _project_root not in sys.path:
     sys.path.insert(0, _project_root)
 
 import phase8_learning  # noqa: F401 — triggers phase8 sys.path setup
-from config.settings import Settings  # noqa: E402
-from database.models import Base  # noqa: E402
+from phase8_learning.config.settings import Settings  # noqa: E402
+from phase8_learning.database.models import Base  # noqa: E402
 
 config = context.config
 
@@ -24,7 +24,7 @@ if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
 settings = Settings.from_env()
-config.set_main_option("sqlalchemy.url", settings.database_url)
+config.set_main_option("sqlalchemy.url", settings.database_url.replace("%", "%%"))
 
 target_metadata = Base.metadata
 

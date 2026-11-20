@@ -6,6 +6,7 @@ and cleanup deletion.
 import json
 import io
 import time
+from pathlib import Path
 
 from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
@@ -40,6 +41,23 @@ class DriveClient:
         }
         folder = self.service.files().create(body=metadata, fields="id").execute()
         return folder["id"]
+
+    def upload_private_backup(self, path: Path, folder_id: str, mimetype: str) -> str:
+        # Reject even a privately shared folder: backup files inherit folder permissions.
+        page_token = None
+        while True:
+            response = self.service.permissions().list(
+                fileId=folder_id, pageToken=page_token, fields="nextPageToken,permissions(role,type)",
+            ).execute()
+            permissions = response.get("permissions", [])
+            if not permissions or any(p != {"type": "user", "role": "owner"} for p in permissions):
+                raise RuntimeError("Backup folder must be owned exclusively by the Drive account")
+            page_token = response.get("nextPageToken")
+            if not page_token:
+                break
+        metadata = {"name": path.name, "parents": [folder_id]}
+        media = MediaFileUpload(str(path), mimetype=mimetype, resumable=True)
+        return self.service.files().create(body=metadata, media_body=media, fields="id").execute()["id"]
 
     def upload_video(self, local_path: str, filename: str, parent_folder_id: str) -> str:
         metadata = {"name": filename, "parents": [parent_folder_id]}
