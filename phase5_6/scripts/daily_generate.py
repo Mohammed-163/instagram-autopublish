@@ -23,7 +23,11 @@ from lib.video_creator import VideoCreator
 from lib.drive_client import DriveClient
 from lib.sheets_client import SheetsClient
 from lib.telegram_notifier import TelegramNotifier
-from lib.quran_content import explanation_is_duplicate, sunday_of, verse_by_key
+from lib.hook_experiment import FALLBACK, SITUATION, experiment_style, planned_hook_variant
+from lib.quran_content import (
+    explanation_is_duplicate, format_verse_reference, sunday_of, verse_by_key,
+    verse_reference_parts,
+)
 
 REQUIRED_VARS = [
     "GOOGLE_SHEET_ID", "GOOGLE_DRIVE_FOLDER_ID",
@@ -36,8 +40,7 @@ def _prepare_caption_and_hashtags(caption: str, hashtags, verse: dict) -> tuple[
     """Remove model placeholders/duplicate verse text and return unique hashtags."""
     caption = str(caption or "")
     ayah_text = str(verse.get("text", "")).strip()
-    surah = str(verse.get("surah", "")).strip()
-    ayah_number = str(verse.get("ayah", "")).strip()
+    surah, first_ayah, last_ayah = verse_reference_parts(verse)
 
     # The authoritative verse and reference are appended below from the catalogue.
     caption = re.sub(
@@ -53,14 +56,15 @@ def _prepare_caption_and_hashtags(caption: str, hashtags, verse: dict) -> tuple[
         caption = re.sub(r"[\ufd3f\ufd3e\u06de]", "", caption)
 
     # Remove a reference the model may have included; the source reference is added once.
-    if surah and ayah_number:
-        reference_pattern = (
-            rf"(?:\u0633\u0648\u0631\u0629\s*)?{re.escape(surah)}\s*"
-            rf"(?:[|,\u060c:\uff1a]\s*|\s+)"
-            rf"(?:\u0627\u0644\u0622\u064a\u0629\s*)?"
-            rf"(?:\d+\s*[:\uff1a]\s*)?{re.escape(ayah_number)}"
-        )
-        caption = re.sub(reference_pattern, " ", caption, flags=re.IGNORECASE)
+    range_end = rf"(?:\s*(?:[-–—]|إلى|الى)\s*{last_ayah})?" if first_ayah != last_ayah else ""
+    reference_pattern = (
+        rf"(?:سورة\s*)?{re.escape(surah)}\s*"
+        rf"(?:[|,،:：]\s*|\s+)"
+        rf"(?:الآيات|الآية|الايات|الاية)?\s*"
+        rf"(?:من\s+)?(?:\d+\s*[:：]\s*)?{first_ayah}{range_end}(?![\d–—-])"
+    )
+    caption = re.sub(reference_pattern, " ", caption, flags=re.IGNORECASE)
+    caption = re.sub(r"\(\s*\)", "", caption)
 
     # Hashtags belong only in the separate hashtags field.
     caption = re.sub(r"(?<!\w)#[\w\u200c\u200d]+", " ", caption)
@@ -310,15 +314,28 @@ def main():
                     learned_hook_guidance=str(plan.get(f"post_{i}_hook_guidance") or ""),
                 )
                 content["hook_line"] = content["hook_line"].strip()
+                variant = planned_hook_variant(now.date(), i)
+                if variant == SITUATION:
+                    try:
+                        content["hook_line"] = gemini.rewrite_situation_hook(
+                            planned_topic, content["hook_line"], verse["text"],
+                            content["iraqi_explanation"],
+                        )
+                    except Exception as exc:
+                        # Existing validated opener remains safe. Label separately,
+                        # so degraded runs do not contaminate either cohort.
+                        variant = FALLBACK
+                        print(f"Opener experiment fell back for slot {i}: {type(exc).__name__}")
+                print(f"Opener study slot {date_str}/{i}: {variant or 'not_enrolled'}")
                 content["fact_line"] = content["iraqi_explanation"].strip()
                 clean_caption, clean_hashtags = _prepare_caption_and_hashtags(
                     content.get("caption_arabic", ""),
                     content.get("hashtags", ""),
                     verse,
                 )
-                verse_reference = f"({verse['surah']}\u060c \u0627\u0644\u0622\u064a\u0629 {verse['ayah']})"
+                verse_reference = format_verse_reference(verse)
                 content["caption_arabic"] = (
-                    f"{clean_caption}\n\n\ufd3f{verse['text']}\ufd3e\n{verse_reference}"
+                    f"{clean_caption}\n\n\ufd3f{verse['text']}\ufd3e\n({verse_reference})"
                 ).strip()
                 if explanation_is_duplicate(content["fact_line"], recent_explanations):
                     raise ValueError("تفسير الآية مكرر أو قريب جداً من شرح سابق في هذا الأسبوع؛ أعد المحاولة.")
@@ -354,7 +371,7 @@ def main():
 
                     output_filename = f"post_{date_str}_{i}.mp4"
                     video_path, music_filename = video_creator.build_post_video(
-                        bg_path, verse["text"], f"{verse['surah']}، الآية {verse['ayah']}",
+                        bg_path, verse["text"], verse_reference,
                         content["fact_line"], tmpdir, output_filename,
                         hook_line=content["hook_line"],
                         music_weights=json.loads(plan.get("music_weights_json") or "{}"),
@@ -402,7 +419,7 @@ def main():
                     "ayah_text": verse["text"],
                     "iraqi_explanation": content["fact_line"],
                     "music_file": music_filename,
-                    "visual_style": "warm_stock_photo_quranic_frame",
+                    "visual_style": experiment_style(variant),
                     "drive_file_id": drive_file_id,
                     "scheduled_time": scheduled_time_iso,
                     "status": config.STATUS_READY,

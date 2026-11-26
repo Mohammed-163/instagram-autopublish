@@ -23,8 +23,9 @@ class InstagramClient:
     def _request(self, method: str, path: str, **kwargs) -> dict:
         url = f"{self.base}/{path}"
         params = kwargs.pop("params", {})
+        timeout = kwargs.pop("timeout", 30)
         params["access_token"] = self.access_token
-        resp = requests.request(method, url, params=params, timeout=30, **kwargs)
+        resp = requests.request(method, url, params=params, timeout=timeout, **kwargs)
         data = resp.json()
         if resp.status_code != 200 or "error" in data:
             raise InstagramAPIError(f"{resp.status_code}: {data}")

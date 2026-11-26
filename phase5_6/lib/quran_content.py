@@ -26,6 +26,30 @@ def verse_by_key(key: str) -> dict:
             return verse
     raise KeyError(f"Unknown Quran verse reference: {key}")
 
+def verse_reference_parts(verse: dict) -> tuple[str, str, str]:
+    """Parse the authoritative key and validate that its ordinal matches the entry."""
+    key = str(verse["key"]).strip()
+    match = re.fullmatch(r"([1-9][0-9]*):([1-9][0-9]*)(?:-([1-9][0-9]*))?", key)
+    if not match:
+        raise ValueError(f"Invalid Quran verse key: {key!r}")
+    chapter, first, last = match.groups()
+    if not 1 <= int(chapter) <= 114 or int(verse["ayah"]) != int(first):
+        raise ValueError(f"Mismatched Quran verse reference: {key!r}")
+    if last and int(last) <= int(first):
+        raise ValueError(f"Invalid Quran verse range: {key!r}")
+    surah = str(verse["surah"]).strip()
+    if not surah:
+        raise ValueError(f"Missing surah name for {key!r}")
+    return surah, first, last or first
+
+
+def format_verse_reference(verse: dict) -> str:
+    """Shared Arabic reference for the video and caption, including all ayat."""
+    surah, first, last = verse_reference_parts(verse)
+    if first == last:
+        return f"{surah}، الآية {first}"
+    return f"{surah}، الآيات من {first} إلى {last}"
+
 
 def sunday_of(value: date) -> date:
     """Return Sunday, the first day of the Iraq-based publishing week."""

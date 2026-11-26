@@ -14,6 +14,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from lib import config
 from lib.gemini_client import GeminiClient
+from lib.hook_experiment import base_visual_style
 from lib.quran_content import load_verses, sunday_of
 from lib.sheets_client import SheetsClient
 from lib.telegram_notifier import TelegramNotifier
@@ -65,7 +66,7 @@ def load_supabase_performance_summary() -> dict:
                         "media_id": item["media_id"],
                         "topic": item["topic_slug"],
                         "ayah_key": item["ayah_key"],
-                        "visual_style": item["visual_style"],
+                        "visual_style": base_visual_style(item["visual_style"]),
                         "music": item["music_file"],
                         "hook": item["hook_line"],
                         "background_query": item["background_query"],
