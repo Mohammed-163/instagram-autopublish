@@ -16,6 +16,7 @@ import pytz
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from lib import config
+from lib.curated_hadith import HADITH_STYLE, selected_curated_hadith
 from lib.error_handler import handle_unexpected, CriticalError, RecoverableError
 from lib.gemini_client import GeminiClient, AllKeysExhaustedError, ImageVettingError
 from lib.pixabay_client import PixabayClient
@@ -237,7 +238,10 @@ def _get_today_theme_from_weekly_plan(now: datetime) -> tuple[str | None, str | 
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--dry-run", action="store_true")
+    parser.add_argument(
+        "--dry-run", action="store_true",
+        default=(os.getenv("DRY_RUN") or "").strip().casefold() == "true",
+    )
     args = parser.parse_args()
 
     _check_required_env_vars(REQUIRED_VARS)
@@ -268,6 +272,14 @@ def main():
         history = sheets.get_weekly_content_history(week_start)
         recent_explanations = list(history["explanations"])
 
+        # Launch the one explicitly dated, curated pilot. The selector
+        # returns None for every other date/slot; an explicit false disables it.
+        curated_enabled = os.getenv("CURATED_HADITH_ENABLED", "true")
+        curated_slots = {
+            i: selected_curated_hadith(now.date(), i, curated_enabled)
+            for i in range(1, post_count + 1)
+        }
+
         gemini_keys = [
             _optional_env("GEMINI_API_KEY_1"),
             _optional_env("GEMINI_API_KEY_2"),
@@ -279,6 +291,9 @@ def main():
 
         if args.dry_run:
             print(f"[DRY RUN] Would generate {post_count} post(s) for {date_str} from weekly plan {week_start}")
+            for slot, curated in curated_slots.items():
+                if curated and (date_str, slot) not in history["post_indexes"]:
+                    print(f"[DRY RUN] Would replace slot {slot} with the curated silent hadith")
             return
 
         drive = DriveClient(
@@ -287,7 +302,8 @@ def main():
         )
         month_folder_id = drive.get_or_create_month_folder(month_label)
         try:
-            video_creator.choose_music()  # fail before spending API calls when mp3/ is empty
+            if not any(curated_slots.values()):
+                video_creator.choose_music()  # maintain the normal verse-day preflight
         except FileNotFoundError as exc:
             raise CriticalError(str(exc)) from exc
 
@@ -297,51 +313,67 @@ def main():
                 if (date_str, i) in history["post_indexes"]:
                     print(f"✓ Post slot {date_str} #{i} already exists; skipping to prevent duplicate generation.")
                     continue
-                recent_topics = sheets.get_recent_topics()
-                planned_topic = str(plan.get(f"post_{i}_topic") or "").strip()
-                verse_key = str(plan.get(f"post_{i}_ayah_key") or "").strip()
-                if not planned_topic or not verse_key:
-                    raise CriticalError(f"الخطة الأسبوعية لا تحتوي موضوعاً وآية للمنشور #{i} في {date_str}.")
-                if verse_key in history["ayah_keys"]:
-                    raise CriticalError(f"الآية {verse_key} مستخدمة مسبقاً هذا الأسبوع؛ أعد إنشاء الخطة الأسبوعية.")
-                verse = verse_by_key(verse_key)
+                curated = curated_slots[i]
+                if curated:
+                    # Do not include this one-off content and audio change in
+                    # either experimental opener arm; no generated religious copy.
+                    content = curated.editorial_content()
+                    planned_topic = "الدعاء حين يطول الانتظار"
+                    source_text = curated.quote
+                    verse_reference = curated.video_reference
+                    ayah_key = ayah_text = ""
+                    visual_style = HADITH_STYLE
+                    print(f"Curated editorial replacement {date_str}/{i}; outside opener study.")
+                else:
+                    planned_topic = str(plan.get(f"post_{i}_topic") or "").strip()
+                    verse_key = str(plan.get(f"post_{i}_ayah_key") or "").strip()
+                    if not planned_topic or not verse_key:
+                        raise CriticalError(f"الخطة الأسبوعية لا تحتوي موضوعاً وآية للمنشور #{i} في {date_str}.")
+                    if verse_key in history["ayah_keys"]:
+                        raise CriticalError(f"الآية {verse_key} مستخدمة مسبقاً هذا الأسبوع؛ أعد إنشاء الخطة الأسبوعية.")
+                    verse = verse_by_key(verse_key)
 
-                content = gemini.generate_hope_post_content(
-                    planned_topic,
-                    verse["text"],
-                    f"{verse['surah']} {verse['key']}",
-                    recent_explanations,
-                    learned_hook_guidance=str(plan.get(f"post_{i}_hook_guidance") or ""),
-                )
-                content["hook_line"] = content["hook_line"].strip()
-                variant = planned_hook_variant(now.date(), i)
-                if variant == SITUATION:
-                    try:
-                        content["hook_line"] = gemini.rewrite_situation_hook(
-                            planned_topic, content["hook_line"], verse["text"],
-                            content["iraqi_explanation"],
-                        )
-                    except Exception as exc:
-                        # Existing validated opener remains safe. Label separately,
-                        # so degraded runs do not contaminate either cohort.
-                        variant = FALLBACK
-                        print(f"Opener experiment fell back for slot {i}: {type(exc).__name__}")
-                print(f"Opener study slot {date_str}/{i}: {variant or 'not_enrolled'}")
-                content["fact_line"] = content["iraqi_explanation"].strip()
-                clean_caption, clean_hashtags = _prepare_caption_and_hashtags(
-                    content.get("caption_arabic", ""),
-                    content.get("hashtags", ""),
-                    verse,
-                )
-                verse_reference = format_verse_reference(verse)
-                content["caption_arabic"] = (
-                    f"{clean_caption}\n\n\ufd3f{verse['text']}\ufd3e\n({verse_reference})"
-                ).strip()
-                if explanation_is_duplicate(content["fact_line"], recent_explanations):
-                    raise ValueError("تفسير الآية مكرر أو قريب جداً من شرح سابق في هذا الأسبوع؛ أعد المحاولة.")
+                    content = gemini.generate_hope_post_content(
+                        planned_topic,
+                        verse["text"],
+                        f"{verse['surah']} {verse['key']}",
+                        recent_explanations,
+                        learned_hook_guidance=str(plan.get(f"post_{i}_hook_guidance") or ""),
+                    )
+                    content["hook_line"] = content["hook_line"].strip()
+                    variant = planned_hook_variant(now.date(), i)
+                    if variant == SITUATION:
+                        try:
+                            content["hook_line"] = gemini.rewrite_situation_hook(
+                                planned_topic, content["hook_line"], verse["text"],
+                                content["iraqi_explanation"],
+                            )
+                        except Exception as exc:
+                            # Existing validated opener remains safe. Label separately,
+                            # so degraded runs do not contaminate either cohort.
+                            variant = FALLBACK
+                            print(f"Opener experiment fell back for slot {i}: {type(exc).__name__}")
+                    print(f"Opener study slot {date_str}/{i}: {variant or 'not_enrolled'}")
+                    content["fact_line"] = content["iraqi_explanation"].strip()
+                    clean_caption, clean_hashtags = _prepare_caption_and_hashtags(
+                        content.get("caption_arabic", ""),
+                        content.get("hashtags", ""),
+                        verse,
+                    )
+                    verse_reference = format_verse_reference(verse)
+                    content["caption_arabic"] = (
+                        f"{clean_caption}\n\n\ufd3f{verse['text']}\ufd3e\n({verse_reference})"
+                    ).strip()
+                    if explanation_is_duplicate(content["fact_line"], recent_explanations):
+                        raise ValueError("تفسير الآية مكرر أو قريب جداً من شرح سابق في هذا الأسبوع؛ أعد المحاولة.")
 
-                # Keep the normalized, deduplicated hashtags as tokens for Daily_Log.
-                content["hashtags"] = clean_hashtags
+                    # Keep the normalized, deduplicated hashtags as tokens for Daily_Log.
+                    content["hashtags"] = clean_hashtags
+
+                    source_text = verse["text"]
+                    ayah_key = verse["key"]
+                    ayah_text = source_text
+                    visual_style = experiment_style(variant)
 
                 # ── Step 6/7: Validate ALL required fields ──────────────────
                 # This gate must run before ANY media operation so that a bad
@@ -361,7 +393,7 @@ def main():
                 # Download and vet a fresh free stock photograph for every post.
                 with tempfile.TemporaryDirectory() as tmpdir:
                     bg_path = os.path.join(tmpdir, "bg.jpg")
-                    topic_summary = f"{planned_topic} — {verse['text']} — {content['fact_line']}"
+                    topic_summary = f"{planned_topic} — {source_text} — {content['fact_line']}"
                     final_pixabay_query = content["pixabay_query"]
                     if visual_mood:
                         final_pixabay_query = f"{final_pixabay_query} {visual_mood}"
@@ -371,10 +403,11 @@ def main():
 
                     output_filename = f"post_{date_str}_{i}.mp4"
                     video_path, music_filename = video_creator.build_post_video(
-                        bg_path, verse["text"], verse_reference,
+                        bg_path, source_text, verse_reference,
                         content["fact_line"], tmpdir, output_filename,
                         hook_line=content["hook_line"],
-                        music_weights=json.loads(plan.get("music_weights_json") or "{}"),
+                        music_weights=None if curated else json.loads(plan.get("music_weights_json") or "{}"),
+                        hadith=bool(curated),
                     )
 
                     drive_file_id = drive.upload_video(
@@ -415,11 +448,11 @@ def main():
                     "caption_arabic": content["caption_arabic"],
                     "hashtags": " ".join(content.get("hashtags", [])),
                     "background_query": content.get("pixabay_query", ""),
-                    "ayah_key": verse["key"],
-                    "ayah_text": verse["text"],
+                    "ayah_key": ayah_key,
+                    "ayah_text": ayah_text,
                     "iraqi_explanation": content["fact_line"],
                     "music_file": music_filename,
-                    "visual_style": experiment_style(variant),
+                    "visual_style": visual_style,
                     "drive_file_id": drive_file_id,
                     "scheduled_time": scheduled_time_iso,
                     "status": config.STATUS_READY,
@@ -427,7 +460,8 @@ def main():
                     "cleaned_at": "",
                 })
                 generated += 1
-                history["ayah_keys"].add(verse["key"])
+                if ayah_key:
+                    history["ayah_keys"].add(ayah_key)
                 history["explanations"].append(content["fact_line"])
                 recent_explanations.append(content["fact_line"])
                 history["post_indexes"].add((date_str, i))

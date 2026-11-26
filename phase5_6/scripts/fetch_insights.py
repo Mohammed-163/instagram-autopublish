@@ -17,6 +17,7 @@ from sqlalchemy import inspect, text
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from lib import config
+from lib.curated_hadith import HADITH_STYLE
 from lib.instagram_client import InstagramClient, InstagramAPIError
 from lib.sheets_client import SheetsClient
 
@@ -285,7 +286,10 @@ def main():
                 with factory.new_session() as session, session.begin():
                     if not _save_snapshot(session, row, period, target_at, captured_at, {**metrics, **retention}):
                         continue
-                    _persist_learning(session, row, period, metrics, captured_at)
+                    # Preserve raw hadith performance; do not feed this one-off
+                    # exception into the automated Quran content learning layer.
+                    if row.get("visual_style") != HADITH_STYLE:
+                        _persist_learning(session, row, period, metrics, captured_at)
                 fetched += 1
             except Exception as exc:
                 failed += 1

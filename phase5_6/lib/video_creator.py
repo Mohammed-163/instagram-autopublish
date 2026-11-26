@@ -136,7 +136,7 @@ class VideoCreator:
 
     def create_image(self, background_path: str, ayah_text: str, reference: str,
                      explanation: str, output_path: str,
-                     hook_line: str = "") -> str:
+                     hook_line: str = "", *, hadith: bool = False) -> str:
         img = self._load_background(background_path).convert("RGBA")
         wash = Image.new("RGBA", img.size, (250, 242, 222, int(255 * config.OVERLAY_OPACITY)))
         img = Image.alpha_composite(img, wash).convert("RGB")
@@ -160,19 +160,27 @@ class VideoCreator:
             # Leave breathing room between the hook and the Quranic text.
             y = hook_bottom + 48
 
-        ayah = f"﴿{ayah_text}﴾"
+        ayah = f"«{ayah_text}»" if hadith else f"﴿{ayah_text}﴾"
         ayah_max_height = max(300, min(700, card_bottom - y - 500))
         y = self._draw_fit(
             draw, ayah, y, ayah_max_height, 76, _hex_to_rgb("#4E3523"),
-            max_width=890, quranic=True,
+            max_width=890, quranic=not hadith,
         )
-        ref_font = ImageFont.truetype(self.arabic_font_path, 34)
-        ref_text = f"سورة {reference}"
-        ref_box = draw.textbbox((0, 0), ref_text, font=ref_font, direction="rtl", language="ar")
-        ref_top = y + 38
-        draw.text(((config.VIDEO_WIDTH - (ref_box[2] - ref_box[0])) // 2, ref_top - ref_box[1]), ref_text,
-                  font=ref_font, fill=_hex_to_rgb("#8C6A3F"), direction="rtl", language="ar")
-        ref_bottom = ref_top + (ref_box[3] - ref_box[1])
+        if hadith:
+            ref_bottom = y + 26
+            for reference_line in reference.splitlines():
+                ref_bottom = self._draw_fit(
+                    draw, reference_line, ref_bottom + 12, 90, 34, _hex_to_rgb("#8C6A3F"),
+                    max_width=850,
+                )
+        else:
+            ref_font = ImageFont.truetype(self.arabic_font_path, 34)
+            ref_text = f"سورة {reference}"
+            ref_box = draw.textbbox((0, 0), ref_text, font=ref_font, direction="rtl", language="ar")
+            ref_top = y + 38
+            draw.text(((config.VIDEO_WIDTH - (ref_box[2] - ref_box[0])) // 2, ref_top - ref_box[1]), ref_text,
+                      font=ref_font, fill=_hex_to_rgb("#8C6A3F"), direction="rtl", language="ar")
+            ref_bottom = ref_top + (ref_box[3] - ref_box[1])
         divider_y = ref_bottom + 30
         draw.line((190, divider_y, config.VIDEO_WIDTH - 190, divider_y), fill=(176, 137, 83), width=2)
         explanation_y = divider_y + int(42 * 1.5)
@@ -202,13 +210,16 @@ class VideoCreator:
                    for path in choices]
         return random.choices(choices, weights=weights, k=1)[0]
 
-    def image_to_video(self, image_path: str, output_path: str, music_path: str) -> str:
+    def image_to_video(self, image_path: str, output_path: str, music_path: str | None) -> str:
+        audio_input = ["-stream_loop", "-1", "-i", music_path] if music_path else [
+            "-f", "lavfi", "-i", "anullsrc=r=48000:cl=stereo",
+        ]
         command = [
             "ffmpeg", "-y", "-loop", "1", "-i", image_path,
-            "-stream_loop", "-1", "-i", music_path,
+            *audio_input,
             "-t", str(config.VIDEO_DURATION_SECONDS),
             "-vf", f"scale={config.VIDEO_WIDTH}:{config.VIDEO_HEIGHT},format=yuv420p",
-            "-af", "volume=0.18,afade=t=out:st=5:d=1",
+            *(["-af", "volume=0.18,afade=t=out:st=5:d=1"] if music_path else []),
             "-c:v", "libx264", "-preset", "medium", "-r", "30",
             "-c:a", "aac", "-b:a", "128k", "-movflags", "+faststart",
             "-shortest", output_path,
@@ -221,16 +232,19 @@ class VideoCreator:
     def build_post_video(self, background_path: str, ayah_text: str, reference: str,
                          explanation: str, workdir: str, output_filename: str,
                          hook_line: str = "",
-                         music_weights: dict[str, float] | None = None) -> tuple[str, str]:
-        music_path = self.choose_music(music_weights)
+                         music_weights: dict[str, float] | None = None,
+                         *, hadith: bool = False) -> tuple[str, str]:
+        # For this editorial exception use a completely silent AAC track,
+        # preserving container compatibility without MP3 or music rights.
+        music_path = None if hadith else self.choose_music(music_weights)
         image_path = os.path.join(workdir, "temp_frame.png")
         video_path = os.path.join(workdir, output_filename)
         self.create_image(
             background_path, ayah_text, reference, explanation, image_path,
-            hook_line=hook_line,
+            hook_line=hook_line, hadith=hadith,
         )
         self.image_to_video(image_path, video_path, music_path)
         for path in (image_path, background_path):
             if os.path.exists(path):
                 os.remove(path)
-        return video_path, os.path.basename(music_path)
+        return video_path, os.path.basename(music_path) if music_path else ""

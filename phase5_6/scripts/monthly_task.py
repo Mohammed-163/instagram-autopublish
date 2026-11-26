@@ -13,6 +13,7 @@ import pytz
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from lib import config
+from lib.curated_hadith import HADITH_STYLE
 from lib.gemini_client import GeminiClient
 from lib.hook_experiment import base_visual_style
 from lib.quran_content import load_verses, sunday_of
@@ -51,8 +52,12 @@ def load_supabase_performance_summary() -> dict:
                            reach, views, saved, shares, likes, comments
                     FROM instagram_insight_snapshots
                     WHERE snapshot_period = '24h' AND reach > 0 AND published_at >= :since
+                      AND (visual_style IS NULL OR visual_style <> :hadith_style)
                     ORDER BY published_at DESC
-                """), {"since": datetime.now(timezone.utc) - timedelta(days=90)}).mappings()
+                """), {
+                    "since": datetime.now(timezone.utc) - timedelta(days=90),
+                    "hadith_style": HADITH_STYLE,
+                }).mappings()
                 for item in rows:
                     target = _parse_local_datetime(item["target_at"])
                     capture = _parse_local_datetime(item["captured_at"])
