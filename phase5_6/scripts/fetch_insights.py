@@ -7,9 +7,11 @@ from __future__ import annotations
 
 import os
 import json
+import math
 import sys
 from datetime import datetime, timedelta, timezone
 
+from requests import RequestException
 from sqlalchemy import inspect, text
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
@@ -21,6 +23,11 @@ from lib.sheets_client import SheetsClient
 MILESTONES = (("1h", 1), ("2h", 2), ("6h", 6), ("24h", 24), ("3d", 72), ("7d", 168))
 MAX_SNAPSHOT_DELAY = timedelta(minutes=30)
 INSIGHTS_METRICS = ("reach", "saved", "likes", "comments", "shares", "views", "total_interactions")
+# Keep IG Media Insights names and native numeric units in metrics_json:
+# average watch time is milliseconds; skip rate is Meta's first-three-second rate
+# as returned (do not assume/convert a fraction or a percentage).
+REELS_RETENTION_METRICS = ("ig_reels_avg_watch_time", "reels_skip_rate")
+RETENTION_TIMEOUT_SECONDS = 4
 SUPPORTED_MEDIA_PRODUCT_TYPES = {"FEED", "REELS", "CAROUSEL_ALBUM"}
 
 
@@ -177,6 +184,41 @@ def fetch_media_insights(ig, media_id):
     return result, product_type
 
 
+def fetch_optional_reels_retention(ig, media_id, product_type, deadline):
+    """Return Reel-only estimates without jeopardizing already-read core metrics."""
+    if product_type != "REELS":
+        return {}
+    result = dict.fromkeys(REELS_RETENTION_METRICS)
+    for metric in REELS_RETENTION_METRICS:
+        if (deadline - datetime.now(timezone.utc)).total_seconds() <= RETENTION_TIMEOUT_SECONDS:
+            break
+        try:
+            # Request independently: an unsupported skip rate must not hide watch time.
+            response = ig._request(
+                "GET", f"{media_id}/insights",
+                params={"metric": metric},
+                timeout=RETENTION_TIMEOUT_SECONDS,
+            )
+        except (InstagramAPIError, RequestException, ValueError):
+            continue
+        if datetime.now(timezone.utc) > deadline:
+            break
+        items = response.get("data") if isinstance(response, dict) else None
+        if not isinstance(items, list):
+            continue
+        for item in items:
+            if not isinstance(item, dict) or item.get("name") != metric:
+                continue
+            values = item.get("values")
+            if not isinstance(values, list) or not values or not isinstance(values[0], dict):
+                continue
+            value = values[0].get("value")
+            if type(value) in (int, float) and math.isfinite(value) and value >= 0:
+                result[metric] = value
+                break
+    return result
+
+
 def _initialize_learning():
     from phase8_learning.config.settings import Settings
     from phase8_learning.database.connection import DatabaseConnectionFactory
@@ -232,9 +274,16 @@ def main():
                     continue
                 if not isinstance(metrics.get("reach"), (int, float)):
                     raise RuntimeError("Instagram did not return reach")
+                # Only the comparable 24h checkpoint needs extra API requests.
+                retention = (
+                    fetch_optional_reels_retention(
+                        ig, media_id, media_type, target_at + MAX_SNAPSHOT_DELAY
+                    )
+                    if period == "24h" else {}
+                )
                 row = {**row, "media_id": media_id}
                 with factory.new_session() as session, session.begin():
-                    if not _save_snapshot(session, row, period, target_at, captured_at, metrics):
+                    if not _save_snapshot(session, row, period, target_at, captured_at, {**metrics, **retention}):
                         continue
                     _persist_learning(session, row, period, metrics, captured_at)
                 fetched += 1

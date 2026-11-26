@@ -64,11 +64,13 @@ class VideoCreator:
         """Use an elegant Arabic display face, falling back to the bundled bold font."""
         try:
             result = subprocess.run(
-                ["fc-match", "-f", "%{file}", "Amiri"],
+                ["fc-match", "-f", "%{family}\t%{file}", "Amiri"],
                 capture_output=True, text=True, check=False, timeout=5,
             )
-            matched = result.stdout.strip()
-            if result.returncode == 0 and os.path.isfile(matched):
+            family, _, matched = result.stdout.strip().partition("\t")
+            # fc-match can return an unrelated non-Arabic face when Amiri is absent.
+            is_amiri = any(name.strip().casefold() == "amiri" for name in family.split(","))
+            if result.returncode == 0 and is_amiri and os.path.isfile(matched):
                 return matched
         except (FileNotFoundError, subprocess.SubprocessError):
             pass

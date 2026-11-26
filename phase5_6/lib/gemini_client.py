@@ -231,6 +231,39 @@ pixabay_query يجب أن تكون 2-4 كلمات إنجليزية عن صورة
             "Gemini did not return all required hope-post fields after 3 attempts"
         )
 
+    def rewrite_situation_hook(
+        self, topic: str, original_hook: str, ayah_text: str, reflection: str
+    ) -> str:
+        """Rewrite only the hook, preserving the verse, reflection and template."""
+        prompt = f"""أعد صياغة افتتاحية ريل إيماني باللهجة العراقية.
+موضوعه: {topic}
+الآية (للسياق فقط، لا تنقلها في الافتتاحية): {ayah_text}
+الوقفة (للسياق فقط): {reflection}
+الافتتاحية الأصلية: {original_hook}
+
+أعطني سطراً واحداً من 5 إلى 12 كلمة يبدأ بمشهد يومي ملموس يتعلق بالموضوع
+(فعل أو لحظة أو تفصيل يلاحظه الشخص)، لا بعنوان مجرد أو افتتاحية «هل تعلم».
+مثال للأسلوب فقط: «تطالع شاشة الموبايل وتنتظر الرد اللي ما إجه؟».
+لا تنسخ المثال، لا تنقل آية أو رواية، لا تعد بنتيجة أو بموعد، ولا تضف دعوة للتفاعل.
+ارجع JSON فقط بالشكل {{"hook_line": "..."}}
+"""
+        for _ in range(2):
+            try:
+                data = self._extract_json(self._call_with_fallback(prompt))
+                raw = data.get("hook_line") if isinstance(data, dict) else None
+                if not isinstance(raw, str) or "\n" in raw or "\r" in raw:
+                    continue
+                hook = self._normalize_iraqi_dialect({"hook_line": raw.strip()})["hook_line"]
+                if (
+                    5 <= len(hook.split()) <= 12
+                    and hook.casefold() != original_hook.strip().casefold()
+                    and not any(marker in hook for marker in ("﴿", "﴾", "قال الله", "يقول الله", "#"))
+                ):
+                    return hook
+            except (json.JSONDecodeError, ValueError):
+                continue
+        raise ValueError("No valid concrete-situation opener returned")
+
     def generate_caption_and_hashtags(
         self,
         hook_line: str,
