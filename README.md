@@ -410,3 +410,27 @@ the default is every 15 minutes.
 Weekly backups use the existing Drive OAuth secret and an owner-only folder
 named `instagram-autopublish-private-backups` in that account's My Drive. The
 backup job checks folder permissions before uploading. Keep this folder private.
+
+### Audience strategy preview
+
+On the regular weekly strategy run, an independent **shadow** report proposes
+concrete Iraqi situations and exact verse keys from the repository catalogue.
+It never edits Current_Plan, sends a DM or reply, changes cadence, or changes the
+opener trial. The regular workflow logs only a status; it does not share drafts
+or insights in public Actions logs. In an authorized private terminal, run the
+detailed report with
+`python -m phase5_6.scripts.monthly_task --audience-preview` using the existing
+database configuration. It previews the coming Sunday, needs no Sheets or
+Gemini credentials, and won't write to the database. No new job or service is
+required.
+
+It uses distinct, on-time organic 24-hour snapshots from the preceding 56 days,
+with at least 100 reach and both saves and shares present. Each Reel gets equal
+weight via the median of (saves + shares) per 1,000 reached; the report also
+shows median saves and shares separately. Three or more comparable examples, at
+least two above the account median, and a theme median above that baseline are
+required for a data-backed suggestion. Up to six slots use at most three ranked
+themes and up to two ideas per theme; other slots deliberately explore. A missing
+metric is not zero. Results describe historical association, not a causal
+guarantee. Today's production planner does not consume this report. Compare it
+with the existing plan before opting in to any live editorial changes.
