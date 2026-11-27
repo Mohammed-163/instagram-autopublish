@@ -13,6 +13,7 @@ import pytz
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from lib import config
+from lib.audience_strategy import recommend
 from lib.curated_hadith import HADITH_STYLE
 from lib.gemini_client import GeminiClient
 from lib.hook_experiment import base_visual_style
@@ -32,7 +33,7 @@ DEFAULT_SINGLE_TIME = "18:00"
 DEFAULT_DOUBLE_TIMES = ("13:00", "18:00")
 
 
-def load_supabase_performance_summary() -> dict:
+def load_supabase_performance_summary(*, include_editorial_metadata: bool = False) -> dict:
     """Aggregate actual Instagram metrics already stored by Phase 8 in Supabase."""
     if not any(os.getenv(key) for key in ("LEARNING_LAYER_DATABASE_URL", "DATABASE_URL", "SUPABASE_URL")):
         raise RuntimeError("Supabase/Postgres connection is required; configure LEARNING_LAYER_DATABASE_URL or DATABASE_URL or SUPABASE_URL.")
@@ -86,6 +87,8 @@ def load_supabase_performance_summary() -> dict:
                         "comments": item["comments"],
                         "score": round(weighted / (item["reach"] + 20), 6),
                     })
+                    if include_editorial_metadata:
+                        posts[-1].update(raw_visual_style=item["visual_style"], captured_at=str(item["captured_at"]))
 
         posts.sort(key=lambda row: (row["score"], row["reach"], row["media_id"]), reverse=True)
         by_style: dict[str, list[float]] = defaultdict(list)
@@ -232,7 +235,23 @@ def _build_rows(posts: list[dict], week_start: date, time_policy: dict | None = 
     return rows
 
 
+def audience_report(posts: list[dict], week_start: date, *, private_preview: bool = False) -> dict:
+    # Recommendation only; no mutation, paid model call, or write to the queue.
+    report = recommend(posts, week_start, {verse["key"] for verse in load_verses()})
+    if private_preview:
+        print("Audience strategy (shadow): " + json.dumps(report, ensure_ascii=False, sort_keys=True))
+    else:
+        # This repository has public Actions logs. Do not print insights or draft hooks here.
+        print("Audience strategy shadow preview checked; no production changes.")
+    return report
+
+
 def main() -> None:
+    if sys.argv[1:] == ["--audience-preview"]:
+        week = sunday_of(datetime.now(pytz.timezone(config.BAGHDAD_TZ)).date()) + timedelta(days=7)
+        posts = load_supabase_performance_summary(include_editorial_metadata=True)["_all_posts"]
+        audience_report(posts, week, private_preview=True)
+        return
     config.check_required_env_vars(REQUIRED_VARS)
     notifier = TelegramNotifier(config.require_env("TELEGRAM_BOT_TOKEN"), config.require_env("TELEGRAM_CHAT_ID"))
     sheets = SheetsClient(config.load_sheets_service_account_json(), config.require_env("GOOGLE_SHEET_ID"))
@@ -244,9 +263,20 @@ def main() -> None:
         now = datetime.now(pytz.timezone(config.BAGHDAD_TZ))
         week_start = sunday_of(now.date())
         print(f"Reading prior real performance from Supabase for plan starting {week_start}...")
-        performance = load_supabase_performance_summary()
+        performance = load_supabase_performance_summary(include_editorial_metadata=True)
         print(f"Loaded {performance['sample_size']} measured Instagram posts from Supabase.")
-        time_policy = choose_publishing_times(performance.pop("_all_posts", []), week_start)
+        posts = performance.pop("_all_posts", [])
+        time_policy = choose_publishing_times(posts, week_start)
+        try:
+            audience_report(posts, week_start)
+        except Exception as exc:
+            # Preview failures must not interrupt the ordinary plan or reveal secrets.
+            print(f"Audience strategy preview unavailable: {type(exc).__name__}")
+        for post in posts:
+            # Shared references also occur in top_posts: don't alter the live
+            # model prompt or teach it the opener experiment's internal labels.
+            post.pop("raw_visual_style", None)
+            post.pop("captured_at", None)
         music_weights = performance.get("music_weights", {})
         print(f"Publishing-time policy: {time_policy}")
         performance["publishing_time_policy"] = {
